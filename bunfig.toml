@@ -1,0 +1,6 @@
+[install]
+minimumReleaseAge = 604800 # 7d
+
+# C: is chronically full on this machine — keep bun's package cache on D:.
+[install.cache]
+dir = "D:/bun-cache"

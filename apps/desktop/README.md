@@ -1,0 +1,73 @@
+# CupCat Desktop (Tauri)
+
+The Windows desktop shell. It launches the compiled bridge (`cupcat-bridge.exe`) as a **sidecar**
+and shows the bundled SPA, which talks to the bridge on `127.0.0.1:19789` (MCP + WebSocket + media).
+The result is a single installable app — the end user needs **no** bun, node, ffmpeg, or Python.
+
+## Build prerequisites (build machine only — NOT the end user)
+
+- **Rust** (MSVC toolchain) + the MSVC linker — verified here: `rustc 1.96 x86_64-pc-windows-msvc`.
+- **bun** (to compile the bridge and build the web SPA).
+- **WebView2** runtime (present on Windows 11 / installed by the NSIS bundle on older Windows).
+- Tauri downloads **NSIS** automatically on first bundle.
+
+## Build the installer
+
+From the repo root:
+
+```sh
+# 1. Build the web SPA  → apps/web/dist  (bundled by Tauri as the frontend)
+bun run build:web
+
+# 2. Compile the bridge → dist-bridge/cupcat-bridge.exe  (self-contained, bun runtime included)
+bun run build:bridge
+
+# 3. Copy the bridge in as the Tauri sidecar (target-triple-suffixed name)
+cp dist-bridge/cupcat-bridge.exe \
+   apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
+
+# 4. Build the desktop app + NSIS installer
+cd apps/desktop && npx @tauri-apps/cli@latest build
+```
+
+The installer lands in `apps/desktop/src-tauri/target/release/bundle/nsis/`.
+
+## Dev
+
+```sh
+cd apps/desktop && npx @tauri-apps/cli@latest dev
+```
+
+(Requires the web `dist` to exist — run `bun run build:web` first, or point `build.devUrl`
+at the Vite dev server.)
+
+## Bundled sidecars
+
+`tauri build` bundles everything in `src-tauri/sidecars/` (gitignored) into the installer, and
+`main.rs` points the bridge at them via env, so the installed app needs nothing preinstalled.
+Populate that folder before building:
+
+```sh
+mkdir -p apps/desktop/src-tauri/sidecars
+
+# ffmpeg/ffprobe — the REAL binaries (not the chocolatey shims)
+cp "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin/ffmpeg.exe"  apps/desktop/src-tauri/sidecars/
+cp "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin/ffprobe.exe" apps/desktop/src-tauri/sidecars/
+
+# Higgsfield CLI → standalone exe (no Node needed)
+bun build --compile node_modules/@higgsfield/cli/bin/higgsfield.js \
+  --outfile apps/desktop/src-tauri/sidecars/higgsfield.exe
+
+# whisper.cpp (whisper-cli.exe + ggml*.dll) — from github.com/ggml-org/whisper.cpp/releases (whisper-bin-x64.zip)
+# + model ggml-base.bin — from huggingface.co/ggerganov/whisper.cpp
+# unzip the Release/ DLLs + whisper-cli.exe and the model into src-tauri/sidecars/
+```
+
+Wired env (`main.rs`): `CUPCAT_FFMPEG_BIN`, `CUPCAT_FFPROBE_BIN`, `CUPCAT_HIGGSFIELD_BIN`,
+`CUPCAT_WHISPER_KIND=cpp`, `CUPCAT_WHISPER_BIN`, `CUPCAT_WHISPER_MODEL_FILE`.
+
+## First run (Fase 7d)
+
+A setup step runs `higgsfield auth login` (browser OAuth) for generation, and helps connect Claude
+via `claude mcp add --transport http cupcat http://127.0.0.1:19789/mcp` (Claude Code) or the bundled
+`.mcpb` (Claude Desktop). CupCat uses the user's own Claude subscription — no API key is embedded.

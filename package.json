@@ -1,0 +1,24 @@
+{
+  "name": "cupcat",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "description": "Free, local, AI-native video editor for Windows. Claude edits your timeline over MCP; media generation via your own Higgsfield account.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:core": "bun --filter @cupcat/editor-core build",
+    "dev:core": "bun --filter @cupcat/editor-core build --watch",
+    "build:web": "bun run build:core && bun --filter @cupcat/web build",
+    "build:bridge": "bun run build:core && bun build --compile apps/bridge/src/index.ts --outfile dist-bridge/cupcat-bridge.exe",
+    "web": "bun run build:core && bun --filter @cupcat/web dev",
+    "bridge": "bun run build:core && bun --filter @cupcat/bridge dev",
+    "typecheck": "bun run build:core && bun --filter @cupcat/editor-core typecheck && bun --filter @cupcat/bridge typecheck && bun --filter @cupcat/web typecheck"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}
