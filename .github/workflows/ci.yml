@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build shared model
+        run: bun run build:core
+
+      # Static analysis across the whole workspace. Bundled AI engines (ffmpeg, Whisper,
+      # Piper, sherpa-onnx) are not needed for typechecking or the unit tests.
+      - name: Typecheck (editor-core + bridge + web)
+        run: bun run typecheck
+
+      - name: Unit tests — editor-core
+        run: bun --filter @cupcat/editor-core test
+
+      - name: Unit tests — web
+        run: bun --filter @cupcat/web test
