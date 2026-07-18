@@ -2,7 +2,7 @@
 // server — one server on the Palmier-style port 19789.
 
 import { join } from "node:path";
-import { CHAT_MODELS, type ChatRequest, getClaudeStatus, requestChatStop, runChat, setApiKey } from "./agent-chat";
+import { availableChatModels, type ChatRequest, getClaudeStatus, requestChatStop, runChat, setApiKey } from "./agent-chat";
 import { deleteChat, getChats, newChat, saveActiveChat, saveChat, selectChat } from "./chats";
 import { BRIDGE_PORT, exportsDir, webDir } from "./config";
 import { ensureCompoundBake } from "./export";
@@ -11,7 +11,9 @@ import { createFeedbackBundle } from "./feedback";
 import { handleRpc, type RpcMessage } from "./mcp-http";
 import { audioPeaks, ensureAudioProxy, ensureScrubProxy, ensureThumbnail } from "./ffmpeg";
 import { mediaPathFor, saveProject } from "./media";
-import { killTagged } from "./proc";
+import { killTagged, openInBrowser } from "./proc";
+import { claudeInstalled, installClaudeCode, startClaudeLogin, submitClaudeCode } from "./claude-code";
+import { checkForUpdate } from "./update";
 import { createProject, deleteProject, listProjects, switchProject } from "./projects";
 
 interface Sendable {
@@ -108,6 +110,18 @@ export function startServer(ctx: BridgeContext) {
     }
   };
 
+  /** Send an arbitrary JSON message to every connected client. */
+  const broadcastRaw = (obj: unknown) => {
+    const msg = JSON.stringify(obj);
+    for (const ws of clients) {
+      try {
+        ws.send(msg);
+      } catch {
+        /* dropped client */
+      }
+    }
+  };
+
   const broadcastStatus = async () => {
     const claude = await getClaudeStatus();
     const msg = JSON.stringify({
@@ -147,6 +161,10 @@ export function startServer(ctx: BridgeContext) {
       }
 
       if (path === "/health") return Response.json({ ok: true, port: BRIDGE_PORT });
+
+      // In-app update check: compares the running build with the latest GitHub release. Returns
+      // "no update" while the repo is private; starts working once releases are public.
+      if (path === "/update/check") return Response.json(await checkForUpdate(), { headers: cors });
 
       // Project picker: list projects, or create/switch (reloads the document → broadcasts new state).
       if (path === "/projects") {
@@ -302,7 +320,7 @@ export function startServer(ctx: BridgeContext) {
             claude, // { connected, mode, expiresAt, expired }
             higgsfield: { connected: ctx.canGenerate() },
             canGenerate: ctx.canGenerate(),
-            models: CHAT_MODELS,
+            models: await availableChatModels(),
           },
           { headers: cors },
         );
@@ -329,6 +347,7 @@ export function startServer(ctx: BridgeContext) {
         requestChatStop();
         return Response.json({ stopping: true }, { headers: cors });
       }
+
 
       // In-app AI assistant chat: runs the Anthropic tool-use loop, streaming events back as SSE.
       if (path === "/agent/chat" && req.method === "POST") {
@@ -513,8 +532,54 @@ export function startServer(ctx: BridgeContext) {
             }),
           );
         } else if (msg.type === "setup") {
-          if (msg.action === "higgsfield-login") await ctx.loginHiggsfield();
-          else if (msg.action === "set-anthropic-key" && typeof (msg as { key?: string }).key === "string") {
+          if (msg.action === "higgsfield-login") {
+            // Open the device-login URL for the user AND push it to the UI (belt-and-suspenders:
+            // the CLI's own browser-open can fail on a fresh PC / sidecar context).
+            await ctx.loginHiggsfield((url) => {
+              openInBrowser(url);
+              broadcastRaw({ type: "higgsfield-login-url", url });
+            });
+          } else if (msg.action === "claude-login") {
+            // Provision + sign in with the OFFICIAL Claude Code CLI: install it if missing, then run
+            // its own `auth login`, which opens the browser and prints a sign-in URL (surfaced to the
+            // UI like Higgsfield). The official client does all the OAuth and writes the credentials
+            // CupCat reads — we don't implement Anthropic's OAuth ourselves. Long-running (waits for
+            // the pasted code), so run detached and report progress via broadcasts.
+            void (async () => {
+              try {
+                if (!(await claudeInstalled())) {
+                  broadcastRaw({ type: "claude-login-progress", text: "Installing Claude Code…" });
+                  const ok = await installClaudeCode((line) => broadcastRaw({ type: "claude-login-progress", text: line }));
+                  if (!ok) {
+                    broadcastRaw({ type: "claude-login-error", text: "Couldn't install Claude Code automatically. Check your connection, or use an API key." });
+                    await broadcastStatus();
+                    return;
+                  }
+                }
+                broadcastRaw({ type: "claude-login-progress", text: "Opening the Claude sign-in…" });
+                const ok = await startClaudeLogin(
+                  (url) => {
+                    openInBrowser(url);
+                    broadcastRaw({ type: "claude-login-url", url });
+                    broadcastRaw({ type: "claude-login-progress", text: "Approve in the browser, then paste the code it shows." });
+                  },
+                  (line) => broadcastRaw({ type: "claude-login-progress", text: line }),
+                );
+                broadcastRaw(
+                  ok
+                    ? { type: "claude-login-progress", text: "Connected." }
+                    : { type: "claude-login-error", text: "Sign-in didn't complete. Try again, or use an API key." },
+                );
+              } catch (e) {
+                broadcastRaw({ type: "claude-login-error", text: e instanceof Error ? e.message : String(e) });
+              } finally {
+                await broadcastStatus();
+              }
+            })();
+          } else if (msg.action === "claude-login-code" && typeof (msg as { code?: string }).code === "string") {
+            const ok = submitClaudeCode((msg as { code: string }).code);
+            if (!ok) broadcastRaw({ type: "claude-login-error", text: "No sign-in is waiting for a code. Start the Claude sign-in first." });
+          } else if (msg.action === "set-anthropic-key" && typeof (msg as { key?: string }).key === "string") {
             await setApiKey((msg as { key: string }).key);
           } else await ctx.refreshHiggsfield();
           await broadcastStatus();

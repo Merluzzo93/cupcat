@@ -24,7 +24,7 @@ function renderMarkdown(text: string): ReactNode[] {
     if (tok.startsWith("**")) out.push(<strong key={key++}>{tok.slice(2, -2)}</strong>);
     else if (tok.startsWith("`"))
       out.push(
-        <code key={key++} className="rounded bg-neutral-800 px-1 text-[0.92em] text-emerald-300">
+        <code key={key++} className="rounded bg-neutral-800 px-1 text-[0.92em] text-emerald-300 break-words [overflow-wrap:anywhere]">
           {tok.slice(1, -1)}
         </code>,
       );
@@ -361,7 +361,11 @@ export function ChatPanel() {
                   ))}
                 </div>
               )}
-              {turn.text && <div className="whitespace-pre-wrap leading-relaxed">{renderMarkdown(turn.text)}</div>}
+              {turn.text && (
+                // break-words + overflow-wrap:anywhere so a long unbreakable asset name (no spaces)
+                // wraps instead of overflowing and triggering a horizontal scrollbar on the panel.
+                <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">{renderMarkdown(turn.text)}</div>
+              )}
               {turn.role === "assistant" && !turn.text && chatBusy && i === chat.length - 1 && (
                 <div className="text-neutral-500">…</div>
               )}

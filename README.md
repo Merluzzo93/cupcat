@@ -8,10 +8,13 @@
 
 Claude edits your timeline. Everything runs on your machine. No credits, no watermark, no account.
 
+[![Website](https://img.shields.io/badge/website-cupcat.meetaly.agency-14b8a6.svg)](https://cupcat.meetaly.agency)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)]()
-[![Release](https://img.shields.io/badge/release-v1.7.0-e5484d.svg)](../../releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.7.3-e5484d.svg)](../../releases/latest)
 [![Local & free](https://img.shields.io/badge/AI-100%25%20local%20%C2%B7%20free-2ea043.svg)]()
+
+**🌐 Website & docs: [cupcat.meetaly.agency](https://cupcat.meetaly.agency)**
 
 </div>
 
@@ -93,10 +96,10 @@ hands you the Export button; it never renders on your behalf.
 
 ## Install
 
-**Just want to use it:** download the installer from the
-[**latest release**](../../releases/latest) — `CupCat_<version>_x64-setup.exe` — and run it. It's a
+**Just want to use it:** download the installer from **[cupcat.meetaly.agency](https://cupcat.meetaly.agency)**
+or the [**latest release**](../../releases/latest) — `CupCat_<version>_x64-setup.exe` — and run it. It's a
 self-contained Windows app; every local engine (ffmpeg, Whisper, Piper, sherpa-onnx) is bundled.
-No preinstalls, no Python, no credits.
+No preinstalls, no Python, no credits. CupCat checks for new versions on launch and offers a one-click download.
 
 To use the in-app assistant or MCP, sign in to **Claude Code** on the same machine. To generate
 media, sign in to **Higgsfield** (`higgsfield auth login`).

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { connectBridge, dismissToast, useEditor } from "./store";
 import { Toolbar } from "./Toolbar";
-import { SetupBanner } from "./Setup";
+import { SetupBanner, UpdateBanner } from "./Setup";
 import { ChatPanel } from "./ChatPanel";
 import { MediaPanel } from "./MediaPanel";
 import { Preview } from "./Preview";
@@ -52,6 +52,7 @@ export function EditorApp() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-200">
       <Toolbar />
+      <UpdateBanner />
       <SetupBanner />
       <div className="flex min-h-0 flex-1">
         {showSides && panels.chat && <ChatPanel />}

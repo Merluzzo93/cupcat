@@ -136,3 +136,38 @@ export async function login(): Promise<boolean> {
   const { code } = await run(HIGGSFIELD_BIN, ["auth", "login"]);
   return code === 0;
 }
+
+/**
+ * Device-login that surfaces the URL. The CLI prints the device-login URL then blocks on
+ * "Waiting for approval..." — but a buffered `run()` never yields that line until the process
+ * exits (deadlock: the user never sees the URL). Here we STREAM stdout, extract the
+ * `https://higgsfield.ai/device?code=…` URL and hand it to `onUrl` immediately so the caller can
+ * open it and show it. Resolves true when login completes (exit 0).
+ */
+export async function loginWithUrl(onUrl: (url: string) => void): Promise<boolean> {
+  const proc = Bun.spawn([HIGGSFIELD_BIN, "auth", "login"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  let sent = false;
+  const reader = proc.stdout.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  void (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        if (!sent) {
+          const m = buf.match(/https?:\/\/\S*device\S*/);
+          if (m) {
+            sent = true;
+            onUrl(m[0]);
+          }
+        }
+      }
+    } catch {
+      /* stream ended */
+    }
+  })();
+  const code = await proc.exited;
+  return code === 0;
+}

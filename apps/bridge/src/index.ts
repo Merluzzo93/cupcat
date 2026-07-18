@@ -6,7 +6,7 @@ import { EditorDocument } from "@cupcat/editor-core";
 import { BRIDGE_PORT, projectRoot } from "./config";
 import { type BridgeContext, importFolderMedia } from "./executor";
 import { installLogCapture } from "./feedback";
-import { listModels, login } from "./higgsfield";
+import { listModels, loginWithUrl } from "./higgsfield";
 import { ensureDirs, loadProject } from "./media";
 import { runCli } from "./cli";
 import { startServer } from "./server";
@@ -39,8 +39,10 @@ const ctx: BridgeContext = {
   doc,
   canGenerate: () => canGen,
   refreshHiggsfield,
-  loginHiggsfield: async () => {
-    await login();
+  loginHiggsfield: async (onUrl) => {
+    // Stream the device-login URL so the server can open it + show it to the user (the plain
+    // buffered login never surfaced the URL, so on a fresh PC "nothing happened").
+    await loginWithUrl((url) => onUrl?.(url));
     return refreshHiggsfield();
   },
 };

@@ -6,6 +6,9 @@ import {
   BRIDGE_HTTP,
   downloadFile,
   higgsfieldLogin,
+  claudeLogin,
+  submitClaudeCode,
+  setAnthropicKey,
   listProjects,
   mcpCall,
   mediaUrl,
@@ -1136,13 +1139,23 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [path, setPath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // While true the dialog renders nothing, so the bridge's full-screen screenshot captures the app
+  // underneath instead of this feedback modal. The submit promise keeps running meanwhile.
+  const [capturing, setCapturing] = useState(false);
   const inputCls = "w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 outline-none";
 
   const submit = async () => {
     if (!description.trim() || busy) return;
     setBusy(true);
     setError(null);
+    // Hide this modal, wait for the WebView to composite a frame without it, THEN ask the bridge to
+    // build the bundle (which takes the full-screen screenshot) so the shot shows the editor, not us.
+    setCapturing(true);
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    await new Promise((r) => setTimeout(r, 400));
     const res = await sendFeedback(type, description.trim());
+    setCapturing(false);
     setBusy(false);
     if (res.ok && res.path) setPath(res.path);
     else setError(res.error || "Creazione del pacchetto fallita — il bridge è raggiungibile?");
@@ -1159,6 +1172,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
     );
   };
 
+  if (capturing) return null; // don't paint the modal while the bridge screenshots the screen
   return (
     <Modal title="Feedback" onClose={onClose}>
       <div className="space-y-3 text-xs">
@@ -1211,9 +1225,13 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
 }
 
 function ConnectionsDialog({ onClose }: { onClose: () => void }) {
-  const { agentHasKey, canGenerate, claudeExpiresAt, setupBusy } = useEditor();
+  const { agentHasKey, canGenerate, claudeExpiresAt, setupBusy, higgsfieldLoginUrl, claudeLoginUrl, claudeLoginBusy, claudeLoginProgress, claudeCodeNeeded } =
+    useEditor();
   const claudeWhen =
     claudeExpiresAt && agentHasKey ? `valid until ${new Date(claudeExpiresAt).toLocaleString()}` : null;
+  const [showKey, setShowKey] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [code, setCode] = useState("");
 
   const Row = ({
     name,
@@ -1247,10 +1265,73 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
           ok={agentHasKey}
           detail={
             agentHasKey
-              ? `Signed in with your Claude subscription${claudeWhen ? ` — ${claudeWhen}` : ""}. Opus, Fable, Sonnet and Haiku are available.`
-              : "Not signed in. CupCat uses your Claude subscription via Claude Code — open Claude Code and sign in, then Re-check."
+              ? `Signed in with your Claude subscription${claudeWhen ? ` — ${claudeWhen}` : ""}. The models on your account are available in chat.`
+              : "Sign in with your Claude subscription — CupCat installs the official Claude Code for you if needed, then you just approve in the browser. Or paste an Anthropic API key."
           }
-        />
+        >
+          {!agentHasKey && (
+            <div className="flex w-full flex-col gap-2">
+              <button
+                onClick={() => {
+                  setCode("");
+                  claudeLogin();
+                }}
+                disabled={claudeLoginBusy}
+                className="w-fit rounded-md bg-neutral-200 px-3 py-1 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+              >
+                {claudeLoginBusy ? "Opening…" : "Sign in to Claude"}
+              </button>
+              {claudeLoginProgress && (
+                <span className="text-[11px] text-neutral-400">{claudeLoginProgress}</span>
+              )}
+              {claudeLoginUrl && (
+                <span className="text-[11px] text-neutral-400">
+                  Browser didn't open?{" "}
+                  <a href={claudeLoginUrl} target="_blank" rel="noopener noreferrer" className="text-violet-400 underline">open the sign-in link</a>
+                </span>
+              )}
+              {claudeCodeNeeded && (
+                <div className="flex gap-1.5">
+                  <input
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && code.trim()) submitClaudeCode(code.trim());
+                    }}
+                    placeholder="Paste the code from the browser"
+                    className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-neutral-100 placeholder:text-neutral-600"
+                  />
+                  <button
+                    onClick={() => code.trim() && submitClaudeCode(code.trim())}
+                    className="shrink-0 rounded-md bg-neutral-200 px-3 py-1.5 font-medium text-neutral-900 hover:bg-white"
+                  >
+                    Connect
+                  </button>
+                </div>
+              )}
+              <button onClick={() => setShowKey((v) => !v)} className="w-fit text-[11px] text-neutral-500 hover:text-neutral-300">
+                or use an Anthropic API key instead
+              </button>
+              {showKey && (
+                <div className="flex gap-1.5">
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="sk-ant-…"
+                    className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-neutral-200 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
+                  />
+                  <button
+                    onClick={() => apiKey.trim() && setAnthropicKey(apiKey.trim())}
+                    className="shrink-0 rounded-md bg-neutral-200 px-3 py-1.5 font-medium text-neutral-900 hover:bg-white"
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </Row>
         <Row
           name="Higgsfield"
           ok={canGenerate}
@@ -1261,13 +1342,21 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
           }
         >
           {!canGenerate && (
-            <button
-              onClick={higgsfieldLogin}
-              disabled={setupBusy}
-              className="rounded-md bg-neutral-200 px-3 py-1 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
-            >
-              {setupBusy ? "Opening…" : "Sign in to Higgsfield"}
-            </button>
+            <div className="flex flex-col gap-1.5">
+              <button
+                onClick={higgsfieldLogin}
+                disabled={setupBusy}
+                className="w-fit rounded-md bg-neutral-200 px-3 py-1 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+              >
+                {setupBusy ? "Opening…" : "Sign in to Higgsfield"}
+              </button>
+              {higgsfieldLoginUrl && (
+                <span className="text-[11px] text-neutral-400">
+                  Browser didn't open?{" "}
+                  <a href={higgsfieldLoginUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline">open the login link</a>
+                </span>
+              )}
+            </div>
           )}
         </Row>
         <button

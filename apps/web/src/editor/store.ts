@@ -63,6 +63,13 @@ export interface EditorState {
   lastMessage: string | null;
   canGenerate: boolean;
   setupBusy: boolean;
+  higgsfieldLoginUrl: string | null; // device-login URL surfaced during a Higgsfield sign-in
+  claudeLoginUrl: string | null; // authorize URL surfaced during a Claude sign-in
+  claudeLoginBusy: boolean;
+  claudeLoginProgress: string | null; // latest status line from the official Claude sign-in
+  claudeCodeNeeded: boolean; // the login is waiting for the code the user pastes from the browser
+  update: { latest: string; downloadUrl: string | null; releaseUrl: string | null; notes: string | null } | null; // newer GitHub release
+  updateDismissed: boolean;
   // in-app AI assistant
   chat: ChatTurn[];
   chatList: { id: string; title: string; ts: number }[]; // conversation history (this project)
@@ -98,6 +105,13 @@ let state: EditorState = {
   tool: "select",
   lastMessage: null,
   canGenerate: false,
+  higgsfieldLoginUrl: null,
+  claudeLoginUrl: null,
+  claudeLoginBusy: false,
+  claudeLoginProgress: null,
+  claudeCodeNeeded: false,
+  update: null,
+  updateDismissed: false,
   setupBusy: false,
   chat: [],
   chatList: [],
@@ -188,6 +202,7 @@ export function connectBridge(): void {
     setState({ connected: true });
     void fetchAgentStatus();
     void loadChatHistory(); // restore this project's conversation
+    void checkForUpdate(); // prompt to download when a newer GitHub release exists
     // Keep Claude/Higgsfield connection status live so the services always show as connected.
     if (!statusPoll) statusPoll = setInterval(() => void fetchAgentStatus(), 25000);
   };
@@ -225,12 +240,32 @@ export function connectBridge(): void {
         setState({ lastMessage: String(msg.text ?? "") });
         markLocalAction(); // acks only ever answer THIS window's commands
         if (typeof msg.id === "number") pendingAcks.get(msg.id)?.({ text: String(msg.text ?? ""), isError: !!msg.isError });
+      } else if (msg.type === "higgsfield-login-url" && typeof msg.url === "string") {
+        // The bridge already tried to open the browser; open it here too (the WebView can pop the
+        // system browser) and surface the URL so the user can click/copy it if nothing opened.
+        setState({ higgsfieldLoginUrl: msg.url });
+        try { window.open(msg.url, "_blank", "noopener"); } catch {}
+      } else if (msg.type === "claude-login-url" && typeof msg.url === "string") {
+        // The official Claude sign-in printed its authorize URL; the bridge already opened the
+        // browser, we open it here too and reveal the code box (the login now waits for the code).
+        setState({ claudeLoginUrl: msg.url, claudeLoginBusy: false, claudeCodeNeeded: true });
+        try { window.open(msg.url, "_blank", "noopener"); } catch {}
+      } else if (msg.type === "claude-login-progress" && typeof msg.text === "string") {
+        setState({ claudeLoginProgress: msg.text });
+      } else if (msg.type === "claude-login-error" && typeof msg.text === "string") {
+        setState({ claudeLoginProgress: msg.text, claudeLoginBusy: false, claudeCodeNeeded: false });
       } else if (msg.type === "status")
         setState({
           canGenerate: !!msg.canGenerate,
           agentHasKey: msg.claudeConnected !== undefined ? !!msg.claudeConnected : state.agentHasKey,
           claudeExpiresAt: msg.claudeExpiresAt ?? state.claudeExpiresAt,
           setupBusy: false,
+          // clear login prompts once the corresponding service is connected
+          higgsfieldLoginUrl: msg.canGenerate ? null : state.higgsfieldLoginUrl,
+          claudeLoginUrl: msg.claudeConnected ? null : state.claudeLoginUrl,
+          claudeLoginBusy: msg.claudeConnected ? false : state.claudeLoginBusy,
+          claudeCodeNeeded: msg.claudeConnected ? false : state.claudeCodeNeeded,
+          claudeLoginProgress: msg.claudeConnected ? "Connected." : state.claudeLoginProgress,
         });
     } catch {
       /* ignore malformed frames */
@@ -300,6 +335,21 @@ export async function mcpCall(name: string, args: Record<string, unknown>): Prom
 export function higgsfieldLogin(): void {
   setState({ setupBusy: true });
   socket?.send(JSON.stringify({ type: "setup", action: "higgsfield-login" }));
+}
+
+/** Provision + sign in with the official Claude Code CLI (installs it if missing), the same URL
+ * flow as Higgsfield. The bridge streams progress and the sign-in URL back; after approving in the
+ * browser the user pastes the shown code (submitClaudeCode), which completes the login. */
+export function claudeLogin(): void {
+  setState({ claudeLoginBusy: true, claudeLoginUrl: null, claudeCodeNeeded: false, claudeLoginProgress: "Starting…" });
+  socket?.send(JSON.stringify({ type: "setup", action: "claude-login" }));
+}
+
+/** Send the authorization code the user copied from the browser to the running Claude sign-in. */
+export function submitClaudeCode(code: string): void {
+  if (!code.trim()) return;
+  setState({ claudeLoginProgress: "Completing sign-in…", claudeCodeNeeded: false });
+  socket?.send(JSON.stringify({ type: "setup", action: "claude-login-code", code: code.trim() }));
 }
 
 /** Re-check both connections: re-fetch Claude status + ask the bridge to re-probe Higgsfield. */
@@ -426,6 +476,24 @@ export async function sendFeedback(type: string, description: string): Promise<{
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/** Ask the bridge whether a newer release exists on GitHub. Silent while the repo is private. */
+export async function checkForUpdate(): Promise<void> {
+  try {
+    const r = await fetch(`${BRIDGE_HTTP}/update/check`);
+    const j = (await r.json()) as { updateAvailable?: boolean; latest?: string; downloadUrl?: string | null; releaseUrl?: string | null; notes?: string | null };
+    if (j.updateAvailable && j.latest) {
+      setState({ update: { latest: j.latest, downloadUrl: j.downloadUrl ?? null, releaseUrl: j.releaseUrl ?? null, notes: j.notes ?? null } });
+    }
+  } catch {
+    /* offline / private repo — no update prompt */
+  }
+}
+
+/** Dismiss the update banner for this session. */
+export function dismissUpdate(): void {
+  setState({ updateDismissed: true });
 }
 
 /** Switch to (or create) a project. The new project arrives via the WS "state" broadcast; the

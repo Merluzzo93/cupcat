@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { SERVER_INSTRUCTIONS } from "./agent-instructions";
 import { type BridgeContext, executeTool } from "./executor";
+import { killAgentProcs, setAgentActive } from "./proc";
 import { conversationSummaries } from "./chats";
 import { loadMemories } from "./memory";
 import { TOOL_DEFS } from "./mcp-tools";
@@ -90,6 +91,36 @@ export async function getAuth(): Promise<ClaudeAuth | null> {
   return null;
 }
 
+/**
+ * The chat models the SIGNED-IN account can actually use. Queries the Models API with the current
+ * auth and keeps only the CHAT_MODELS the account is entitled to. Best-effort: on any failure (no
+ * auth, endpoint not permitted for this token, network error) it returns the full list, so the
+ * dropdown never ends up empty.
+ */
+export async function availableChatModels(): Promise<typeof CHAT_MODELS> {
+  const auth = await getAuth();
+  if (!auth) return CHAT_MODELS;
+  try {
+    const headers: Record<string, string> = { "anthropic-version": API_VERSION };
+    if (auth.mode === "apikey") headers["x-api-key"] = auth.token;
+    else {
+      headers.authorization = `Bearer ${auth.token}`;
+      headers["anthropic-beta"] = "oauth-2025-04-20";
+    }
+    const res = await fetch("https://api.anthropic.com/v1/models?limit=100", { headers });
+    if (!res.ok) return CHAT_MODELS;
+    const j = (await res.json()) as { data?: { id?: string }[] };
+    const ids = (j.data ?? []).map((m) => m.id).filter((x): x is string => typeof x === "string");
+    if (ids.length === 0) return CHAT_MODELS;
+    // A configured model counts as available if a returned id matches it (either direction handles
+    // the dated vs base-id variants, e.g. claude-haiku-4-5 vs claude-haiku-4-5-20251001).
+    const avail = CHAT_MODELS.filter((m) => ids.some((id) => id === m.id || id.startsWith(m.id) || m.id.startsWith(id)));
+    return avail.length ? avail : CHAT_MODELS;
+  } catch {
+    return CHAT_MODELS;
+  }
+}
+
 /** Manual API-key fallback (Setup). Most users never need this — Claude Code OAuth is used. */
 export async function setApiKey(key: string): Promise<void> {
   await mkdir(dirname(KEY_FILE), { recursive: true });
@@ -126,7 +157,7 @@ function toToolResultContent(content: { type: string; text?: string; data?: stri
   );
 }
 
-async function callAnthropic(auth: ClaudeAuth, model: string, system: string, messages: ChatMessage[], opts: { tools?: boolean; maxTokens?: number } = {}) {
+async function callAnthropic(auth: ClaudeAuth, model: string, system: string, messages: ChatMessage[], opts: { tools?: boolean; maxTokens?: number; signal?: AbortSignal } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json", "anthropic-version": API_VERSION };
   const betas: string[] = [];
   if (auth.mode === "apikey") {
@@ -171,6 +202,7 @@ async function callAnthropic(auth: ClaudeAuth, model: string, system: string, me
       res = await fetch(API_URL, {
         method: "POST",
         headers,
+        signal: opts.signal, // a chat-stop aborts the in-flight request
         body: JSON.stringify({
           model,
           max_tokens: opts.maxTokens ?? (adaptive ? 8192 : 4096),
@@ -183,6 +215,8 @@ async function callAnthropic(auth: ClaudeAuth, model: string, system: string, me
       });
       break;
     } catch (e) {
+      // A user-requested stop aborts the fetch — surface it at once, never retry.
+      if (e instanceof Error && e.name === "AbortError") throw e;
       lastNetErr = e;
       res = null;
       if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1) * (attempt + 1)));
@@ -238,8 +272,11 @@ export interface ChatRequest {
 // One chat run at a time (the client gates on chatBusy); the Stop button sets this flag and the
 // loop exits at the next turn/tool boundary — the timeline keeps whatever edits already landed.
 let stopRequested = false;
+let currentAbort: AbortController | null = null;
 export function requestChatStop(): void {
   stopRequested = true;
+  killAgentProcs(); // kill any running tool subprocess (auto_clips ffmpeg passes, etc.)
+  currentAbort?.abort(); // cancel the in-flight Claude request so nothing new comes back
 }
 
 // ── request size control ──────────────────────────────────────────────────────
@@ -316,6 +353,8 @@ export async function runChat(ctx: BridgeContext, req: ChatRequest, send: (event
   }
 
   stopRequested = false; // a stale stop from a previous run must not kill this one
+  const ac = new AbortController();
+  currentAbort = ac;
   const memories = await loadMemories();
   const priorConversations = await conversationSummaries(req.chatId).catch(() => "");
   let system = SERVER_INSTRUCTIONS + memories + priorConversations;
@@ -335,11 +374,11 @@ export async function runChat(ctx: BridgeContext, req: ChatRequest, send: (event
       }
       let resp: Awaited<ReturnType<typeof callAnthropic>>;
       try {
-        resp = await callAnthropic(auth, model, system, pruneForRequest(messages));
+        resp = await callAnthropic(auth, model, system, pruneForRequest(messages), { signal: ac.signal });
       } catch (e) {
         // A 413 despite normal pruning (e.g. one giant image) → retry once with everything pruned.
         if (e instanceof Error && /\b413\b/.test(e.message)) {
-          resp = await callAnthropic(auth, model, system, pruneForRequest(messages, true));
+          resp = await callAnthropic(auth, model, system, pruneForRequest(messages, true), { signal: ac.signal });
         } else throw e;
       }
 
@@ -373,7 +412,14 @@ export async function runChat(ctx: BridgeContext, req: ChatRequest, send: (event
           continue;
         }
         send({ type: "tool_use", name: block.name, input: block.input });
-        const out = await executeTool(ctx, block.name ?? "", (block.input ?? {}) as Record<string, unknown>, "agent");
+        // Mark spawns as agent-owned so a chat-stop can kill this tool's subprocesses mid-flight.
+        setAgentActive(true);
+        let out: Awaited<ReturnType<typeof executeTool>>;
+        try {
+          out = await executeTool(ctx, block.name ?? "", (block.input ?? {}) as Record<string, unknown>, "agent");
+        } finally {
+          setAgentActive(false);
+        }
         const summary = out.content.find((c) => c.type === "text")?.text ?? "[done]";
         send({ type: "tool_result", name: block.name, text: summary.slice(0, 300), isError: out.isError });
         toolResults.push({
@@ -395,7 +441,16 @@ export async function runChat(ctx: BridgeContext, req: ChatRequest, send: (event
       }
     }
   } catch (e) {
-    send({ type: "error", message: e instanceof Error ? e.message : String(e) });
+    // An aborted request (user pressed stop) is not an error — report it as a clean interrupt.
+    if (stopRequested || (e instanceof Error && e.name === "AbortError")) {
+      send({ type: "text", text: "⏹️ Interrotto su tua richiesta. Le modifiche già applicate restano; scrivi \"continua\" per riprendere da qui." });
+    } else {
+      send({ type: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  } finally {
+    if (currentAbort === ac) currentAbort = null;
+    setAgentActive(false);
+    stopRequested = false;
   }
   send({ type: "done" });
 }
@@ -413,6 +468,7 @@ export async function oneShotText(system: string, user: string, opts: { model?: 
   const resp = await callAnthropic(auth, model, system, [{ role: "user", content: user }], {
     tools: false,
     maxTokens: opts.maxTokens ?? 8192,
+    signal: currentAbort?.signal, // a chat-stop aborts internal calls too (e.g. auto_clips curation)
   });
   return resp.content
     .filter((b) => b.type === "text")
@@ -447,6 +503,7 @@ export async function oneShotVision(
   const resp = await callAnthropic(auth, model, system, [{ role: "user", content }], {
     tools: false,
     maxTokens: opts.maxTokens ?? 8192,
+    signal: currentAbort?.signal, // a chat-stop aborts internal calls too (e.g. auto_clips curation)
   });
   return resp.content
     .filter((b) => b.type === "text")

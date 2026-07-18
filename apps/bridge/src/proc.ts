@@ -40,6 +40,34 @@ export function consumeKilled(tag: string): boolean {
   return killed.delete(tag);
 }
 
+// Agent-tool subprocess registry: while the chat agent is executing a tool, every subprocess it
+// spawns is tracked here so a chat-stop can kill them all mid-flight. Untagged tool runs (e.g.
+// auto_clips' many ffmpeg passes) are otherwise unreachable by killTagged and would run to
+// completion after the user pressed stop.
+let agentActive = false;
+const agentProcs = new Set<Subprocess>();
+
+/** Toggle whether run() should register its spawns as agent-owned (call around tool execution). */
+export function setAgentActive(on: boolean): void {
+  agentActive = on;
+  if (!on) agentProcs.clear();
+}
+
+/** Kill every subprocess spawned while the agent was active. Returns how many were killed. */
+export function killAgentProcs(): number {
+  let n = 0;
+  for (const p of agentProcs) {
+    try {
+      p.kill();
+      n++;
+    } catch {
+      /* already exited */
+    }
+  }
+  agentProcs.clear();
+  return n;
+}
+
 export async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string>; tag?: string; stdin?: string } = {}): Promise<RunResult> {
   const needEnv = opts.env || Object.keys(extraEnv).length > 0;
   const proc = Bun.spawn([cmd, ...args], {
@@ -62,6 +90,7 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; env
     // so a cancel that raced a completed export can't mislabel the new one as cancelled.
     killed.delete(opts.tag);
   }
+  if (agentActive) agentProcs.add(proc); // killable by a chat-stop (killAgentProcs)
   try {
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -73,5 +102,16 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; env
     // Only unregister if WE are still the registered process — a concurrent re-run under the
     // same tag would otherwise have its registration wiped by the older run's cleanup.
     if (opts.tag && tagged.get(opts.tag) === proc) tagged.delete(opts.tag);
+    agentProcs.delete(proc);
+  }
+}
+
+/** Open a URL in the user's default browser. Windows-only app: `cmd /c start "" <url>` (the empty
+ * "" is the window-title arg `start` requires before the URL). Best-effort; never throws. */
+export function openInBrowser(url: string): void {
+  try {
+    Bun.spawn(["cmd", "/c", "start", "", url], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+  } catch {
+    /* best effort — the UI also shows the URL so the user can open it manually */
   }
 }

@@ -53,7 +53,7 @@ export interface BridgeContext {
   doc: EditorDocument;
   canGenerate: () => boolean;
   refreshHiggsfield: () => Promise<boolean>;
-  loginHiggsfield: () => Promise<boolean>;
+  loginHiggsfield: (onUrl?: (url: string) => void) => Promise<boolean>;
 }
 
 type Args = Record<string, unknown>;
