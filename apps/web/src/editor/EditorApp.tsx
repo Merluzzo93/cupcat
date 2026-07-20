@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { t } from "./i18n";
 import { connectBridge, dismissToast, useEditor } from "./store";
 import { Toolbar } from "./Toolbar";
 import { LanguageGate } from "./LanguageGate";
@@ -22,16 +23,16 @@ function Toasts() {
   return (
     <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-72 flex-col items-stretch gap-2">
       <style>{"@keyframes cc-toast-in { from { opacity: 0 } to { opacity: 1 } }"}</style>
-      {toasts.map((t) => (
+      {toasts.map((toast) => (
         <button
-          key={t.id}
+          key={toast.id}
           type="button"
-          onClick={() => dismissToast(t.id)}
-          title="Dismiss"
+          onClick={() => dismissToast(toast.id)}
+          title={t("update.dismiss")}
           style={{ animation: "cc-toast-in 0.2s ease-out" }}
           className="pointer-events-auto rounded-md border border-neutral-700 bg-neutral-900/95 px-3 py-2 text-left text-xs text-neutral-200 shadow-lg hover:border-neutral-500"
         >
-          {t.text}
+          {toast.text}
         </button>
       ))}
     </div>

@@ -3,6 +3,7 @@
 // evaluated by mathExpr.ts — junk keeps the old value. Enter/blur commits, Esc reverts.
 
 import { useEffect, useRef, useState } from "react";
+import { t } from "./i18n";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { evaluateExpr } from "./mathExpr";
 
@@ -92,7 +93,7 @@ export function NumberField({ value, onCommit, min, max, step, label, compact = 
           onPointerMove={onScrubMove}
           onPointerUp={onScrubUp}
           onPointerCancel={onScrubUp}
-          title="Drag to scrub · type math (e.g. 1920/2)"
+          title={t("nf.scrubHint")}
           style={{ touchAction: "none" }}
           className={`cursor-ew-resize select-none text-[10px] ${compact ? "text-neutral-500" : "text-neutral-400"}`}
         >

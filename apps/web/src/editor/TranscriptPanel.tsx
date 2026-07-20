@@ -7,6 +7,7 @@
 // buttons are off-limits for this feature.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { mcpCall, ui, useEditor } from "./store";
 import type { CutRange, TranscriptParagraph, TranscriptWord } from "./transcriptModel";
@@ -303,14 +304,14 @@ export function TranscriptPanel() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          title="Transcript — edit the video as text"
+          title={t("tr.panelTitle")}
           className="flex flex-1 flex-col items-center gap-2 pt-3 text-neutral-500 transition hover:bg-neutral-900 hover:text-neutral-300"
         >
           <span aria-hidden className="text-[13px] leading-none">
             ¶
           </span>
           <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ writingMode: "vertical-rl" }}>
-            Transcript
+            {t("transcript.title")}
           </span>
         </button>
       </aside>
@@ -325,7 +326,7 @@ export function TranscriptPanel() {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-neutral-200" />
-        <p className="text-[11px] text-neutral-400">Transcribing the timeline…</p>
+        <p className="text-[11px] text-neutral-400">{t("tr.transcribing")}</p>
         <p className="text-[10px] leading-4 text-neutral-600">Speech recognition runs on your machine — the first pass over long footage can take a few minutes.</p>
       </div>
     );
@@ -348,7 +349,7 @@ export function TranscriptPanel() {
         <span aria-hidden className="text-2xl text-neutral-600">
           ¶
         </span>
-        <p className="text-xs font-medium text-neutral-300">Edit the video as text</p>
+        <p className="text-xs font-medium text-neutral-300">{t("tr.editAsText")}</p>
         <p className="text-[11px] leading-4 text-neutral-500">
           Load the transcript, click a word to jump there, then select words and delete them to cut those moments out of the video.
         </p>
@@ -366,7 +367,7 @@ export function TranscriptPanel() {
   } else if (words.length === 0) {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
-        <p className="text-xs font-medium text-neutral-300">No speech found</p>
+        <p className="text-xs font-medium text-neutral-300">{t("tr.noSpeech")}</p>
         <p className="text-[11px] leading-4 text-neutral-500">
           Nothing spoken was detected in the timeline's video or audio clips (or speech recognition isn't available on this machine).
         </p>
@@ -411,15 +412,15 @@ export function TranscriptPanel() {
     >
       {/* header */}
       <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-neutral-400">Transcript</span>
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-neutral-400">{t("transcript.title")}</span>
         <div className="flex items-center gap-1">
           {loading && words !== null && <span className="h-3 w-3 animate-spin rounded-full border-2 border-neutral-700 border-t-neutral-300" />}
           {words !== null && !loading && (
-            <button type="button" onClick={() => void load()} title="Reload the transcript (fast — transcription is cached)" className={ICON_BTN}>
+            <button type="button" onClick={() => void load()} title={t("tr.reload")} className={ICON_BTN}>
               ↻
             </button>
           )}
-          <button type="button" onClick={() => setOpen(false)} title="Collapse the transcript panel" className={ICON_BTN}>
+          <button type="button" onClick={() => setOpen(false)} title={t("tr.collapse")} className={ICON_BTN}>
             »
           </button>
         </div>
@@ -490,7 +491,7 @@ export function TranscriptPanel() {
                   type="button"
                   onClick={() => void removeFillers()}
                   disabled={deleting || loading}
-                  title="Cut every “um / uh / cioè / like …” and close the gaps"
+                  title={t("tr.removeFiller")}
                   className="w-full rounded bg-amber-600/90 py-1.5 text-[11px] font-medium text-amber-50 transition hover:bg-amber-500 disabled:opacity-50"
                 >
                   {deleting ? "Removing…" : `Remove ${fillerIdxs.length} filler word${fillerIdxs.length === 1 ? "" : "s"}`}

@@ -87,7 +87,7 @@ export function Inspector() {
     <aside className="flex w-64 shrink-0 flex-col border-l border-neutral-800 bg-neutral-950">
       {/* header bar */}
       <div className="border-b border-neutral-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-400">
-        Details
+        {t("details.title")}
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -136,7 +136,7 @@ function ProjectInspector({ project }: { project: Project }) {
   const fpsList = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
   return (
     <div className="space-y-4 p-3 text-[11px]">
-      <h3 className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Project settings</h3>
+      <h3 className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">{t("details.projectSettings")}</h3>
       <div>
         <label className="mb-1 block text-neutral-500">{t("details.resolution")}</label>
         <select
@@ -577,22 +577,22 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
       {/* ── editable properties ── */}
       <div className="flex flex-col gap-3 border-b border-neutral-800 px-3 py-3">
         {/* Duration */}
-        <NumberField label="Duration (frames)" value={duration} min={1} max={1000000} step={1}
+        <NumberField label={t("lb.durationFrames")} value={duration} min={1} max={1000000} step={1}
           onCommit={(v) => { setDuration(v); set({ durationFrames: v }); }} />
 
         {/* Speed — meaningless on media-less clips (text/adjustment): there is no content to retime */}
         {!isText && !isAdjustment && (
-          <NumberField label="Speed (×)" value={speed} min={0.25} max={4} step={0.05}
+          <NumberField label={t("lb.speed")} value={speed} min={0.25} max={4} step={0.05}
             onCommit={(v) => { setSpeed(v); set({ speed: v }); }} />
         )}
 
         {/* Opacity */}
-        <NumberField label="Opacity (0–1)" value={opacity} min={0} max={1} step={0.05}
+        <NumberField label={t("lb.opacity")} value={opacity} min={0} max={1} step={0.05}
           onCommit={(v) => { setOpacity(v); set({ opacity: v }); }} />
 
         {/* Volume */}
         {showVolume && (
-          <NumberField label="Volume (0–1.5)" value={volume} min={0} max={1.5} step={0.05}
+          <NumberField label={t("lb.volume")} value={volume} min={0} max={1.5} step={0.05}
             onCommit={(v) => { setVolume(v); set({ volume: v }); }} />
         )}
 
@@ -600,7 +600,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
         {isText && (
           <>
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] text-neutral-400">Text content</span>
+              <span className="text-[10px] text-neutral-400">{t("insp.textContent")}</span>
               <textarea
                 rows={3}
                 value={textContent}
@@ -611,7 +611,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
             </label>
 
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-neutral-400">Font</span>
+              <span className="text-[10px] text-neutral-400">{t("insp.font")}</span>
               <FontPicker
                 value={fontName}
                 onChange={(v) => {
@@ -621,12 +621,12 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
               />
             </div>
 
-            <NumberField label="Font size" value={fontSize} min={6} max={400} step={1}
+            <NumberField label={t("lb.fontSize")} value={fontSize} min={6} max={400} step={1}
               onCommit={(v) => { setFontSize(v); set({ fontSize: v }); }} />
 
             <div className="flex gap-2">
               <label className="flex flex-1 flex-col gap-1">
-                <span className="text-[10px] text-neutral-400">Color</span>
+                <span className="text-[10px] text-neutral-400">{t("insp.color")}</span>
                 <input
                   type="color"
                   value={color}
@@ -636,7 +636,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
                 />
               </label>
               <label className="flex flex-1 flex-col gap-1">
-                <span className="text-[10px] text-neutral-400">Align</span>
+                <span className="text-[10px] text-neutral-400">{t("insp.align")}</span>
                 <select
                   value={alignment}
                   onChange={(e) => {
@@ -646,9 +646,9 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
                   }}
                   className="h-7 rounded-md border border-neutral-800 bg-neutral-900 px-1 text-[11px] text-neutral-200 outline-none focus:border-sky-600"
                 >
-                  <option value="left">Left</option>
-                  <option value="center">Center</option>
-                  <option value="right">Right</option>
+                  <option value="left">{t("insp.left")}</option>
+                  <option value="center">{t("insp.center")}</option>
+                  <option value="right">{t("insp.right")}</option>
                 </select>
               </label>
             </div>
@@ -658,20 +658,20 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
 
       {/* ── TRANSFORM ── */}
       {showTransformSections && (
-        <CollapsibleSection label="Transform" open={transformOpen} onToggle={() => setTransformOpen((v) => !v)}>
+        <CollapsibleSection label={t("lb.transform")} open={transformOpen} onToggle={() => setTransformOpen((v) => !v)}>
           <div className="flex gap-2">
-            <NumberField compact label="Pos X" value={txCenterX} min={-1} max={2} step={0.01}
+            <NumberField compact label={t("lb.posX")} value={txCenterX} min={-1} max={2} step={0.01}
               onCommit={(v) => { setTxCenterX(v); commitTransform({ centerX: v }); }} />
-            <NumberField compact label="Pos Y" value={txCenterY} min={-1} max={2} step={0.01}
+            <NumberField compact label={t("lb.posY")} value={txCenterY} min={-1} max={2} step={0.01}
               onCommit={(v) => { setTxCenterY(v); commitTransform({ centerY: v }); }} />
           </div>
           <div className="flex gap-2">
-            <NumberField compact label="Scale W" value={txWidth} min={0} max={2} step={0.01}
+            <NumberField compact label={t("lb.scaleW")} value={txWidth} min={0} max={2} step={0.01}
               onCommit={(v) => { setTxWidth(v); commitTransform({ width: v }); }} />
-            <NumberField compact label="Scale H" value={txHeight} min={0} max={2} step={0.01}
+            <NumberField compact label={t("lb.scaleH")} value={txHeight} min={0} max={2} step={0.01}
               onCommit={(v) => { setTxHeight(v); commitTransform({ height: v }); }} />
           </div>
-          <NumberField compact label="Rotation (°)" value={txRotation} min={-180} max={180} step={1}
+          <NumberField compact label={t("lb.rotation")} value={txRotation} min={-180} max={180} step={1}
             onCommit={(v) => { setTxRotation(v); commitTransform({ rotation: v }); }} />
           <div className="flex gap-2 pt-0.5">
             <button
@@ -679,30 +679,30 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
               className={`flex-1 rounded border px-2 py-1 text-[10px] font-medium transition-colors ${
                 txFlipH ? "border-sky-600 bg-sky-900/40 text-sky-300" : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
               }`}
-            >Flip H</button>
+            >{t("insp.flipH")}</button>
             <button
               onClick={() => { const n = !txFlipV; setTxFlipV(n); commitTransform({ flipVertical: n }); }}
               className={`flex-1 rounded border px-2 py-1 text-[10px] font-medium transition-colors ${
                 txFlipV ? "border-sky-600 bg-sky-900/40 text-sky-300" : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
               }`}
-            >Flip V</button>
+            >{t("insp.flipV")}</button>
           </div>
         </CollapsibleSection>
       )}
 
       {/* ── CROP ── */}
       {showTransformSections && (
-        <CollapsibleSection label="Crop" open={cropOpen} onToggle={() => setCropOpen((v) => !v)}>
+        <CollapsibleSection label={t("lb.crop")} open={cropOpen} onToggle={() => setCropOpen((v) => !v)}>
           <div className="flex gap-2">
-            <NumberField compact label="Left" value={cropLeft} min={0} max={0.9} step={0.01}
+            <NumberField compact label={t("lb.left")} value={cropLeft} min={0} max={0.9} step={0.01}
               onCommit={(v) => { setCropLeft(v); commitCrop({ left: v }); }} />
-            <NumberField compact label="Right" value={cropRight} min={0} max={0.9} step={0.01}
+            <NumberField compact label={t("lb.right")} value={cropRight} min={0} max={0.9} step={0.01}
               onCommit={(v) => { setCropRight(v); commitCrop({ right: v }); }} />
           </div>
           <div className="flex gap-2">
-            <NumberField compact label="Top" value={cropTop} min={0} max={0.9} step={0.01}
+            <NumberField compact label={t("lb.top")} value={cropTop} min={0} max={0.9} step={0.01}
               onCommit={(v) => { setCropTop(v); commitCrop({ top: v }); }} />
-            <NumberField compact label="Bottom" value={cropBottom} min={0} max={0.9} step={0.01}
+            <NumberField compact label={t("lb.bottom")} value={cropBottom} min={0} max={0.9} step={0.01}
               onCommit={(v) => { setCropBottom(v); commitCrop({ bottom: v }); }} />
           </div>
         </CollapsibleSection>
@@ -710,7 +710,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
 
       {/* ── MASK ── */}
       {showTransformSections && clip.mask && (
-        <CollapsibleSection label="Mask" open={maskOpen} onToggle={() => setMaskOpen((v) => !v)}>
+        <CollapsibleSection label={t("lb.mask")} open={maskOpen} onToggle={() => setMaskOpen((v) => !v)}>
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-neutral-400">
               {clip.mask.shape === "path" ? `pen path · ${clip.mask.points?.length ?? 0} points` : clip.mask.shape}
@@ -718,9 +718,9 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
             <button
               onClick={() => sendCommand("set_mask", { clipIds: [clip.id], clear: true })}
               className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] font-medium text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors"
-            >Clear</button>
+            >{t("insp.clear")}</button>
           </div>
-          <SliderField label="Feather" value={maskFeather} min={0} max={0.5} step={0.01} display={maskFeather.toFixed(2)}
+          <SliderField label={t("lb.feather")} value={maskFeather} min={0} max={0.5} step={0.01} display={maskFeather.toFixed(2)}
             onChange={(v) => { setMaskFeather(v); setMaskField({ feather: v }); }} />
           <div className="flex gap-2 pt-0.5">
             <button
@@ -728,25 +728,25 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
               className={`flex-1 rounded border px-2 py-1 text-[10px] font-medium transition-colors ${
                 clip.mask.invert ? "border-sky-600 bg-sky-900/40 text-sky-300" : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
               }`}
-            >Invert</button>
+            >{t("insp.invert")}</button>
             {clip.mask.shape === "path" && (
               <button
                 onClick={() => setMaskField({ smooth: !clip.mask!.smooth })}
                 className={`flex-1 rounded border px-2 py-1 text-[10px] font-medium transition-colors ${
                   clip.mask.smooth ? "border-sky-600 bg-sky-900/40 text-sky-300" : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
                 }`}
-              >Smooth</button>
+              >{t("insp.smooth")}</button>
             )}
           </div>
         </CollapsibleSection>
       )}
 
       {/* ── FADES ── */}
-      <CollapsibleSection label="Fades" open={fadesOpen} onToggle={() => setFadesOpen((v) => !v)}>
+      <CollapsibleSection label={t("lb.fades")} open={fadesOpen} onToggle={() => setFadesOpen((v) => !v)}>
         <div className="flex gap-2">
-          <NumberField compact label="Fade In (f)" value={fadeIn} min={0} max={clip.durationFrames} step={1}
+          <NumberField compact label={t("lb.fadeIn")} value={fadeIn} min={0} max={clip.durationFrames} step={1}
             onCommit={(v) => { setFadeIn(v); set({ fadeInFrames: v }); }} />
-          <NumberField compact label="Fade Out (f)" value={fadeOut} min={0} max={clip.durationFrames} step={1}
+          <NumberField compact label={t("lb.fadeOut")} value={fadeOut} min={0} max={clip.durationFrames} step={1}
             onCommit={(v) => { setFadeOut(v); set({ fadeOutFrames: v }); }} />
         </div>
         <button
@@ -759,7 +759,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
 
       {/* ── KEYFRAMES ── */}
       {showTransformSections && (
-        <CollapsibleSection label="Keyframes" open={keyframesOpen} onToggle={() => setKeyframesOpen((v) => !v)}>
+        <CollapsibleSection label={t("lb.keyframes")} open={keyframesOpen} onToggle={() => setKeyframesOpen((v) => !v)}>
           {(["opacity", "scale", "position", "rotation"] as const).map((prop) => {
             // Active chip = the easing ALL keyframes share; a mixed track lights none.
             const easing = trackEasing(kfTrackOf(prop)?.keyframes);
@@ -778,7 +778,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
                   <button
                     onClick={() => clearKeyframes(prop)}
                     className="shrink-0 rounded border border-neutral-800 bg-neutral-900 px-1.5 py-0.5 text-[9px] text-neutral-600 hover:bg-neutral-800 hover:text-red-400 transition-colors"
-                    title="Clear all keyframes for this property"
+                    title={t("insp.clearKeyframes")}
                   >
                     ✕
                   </button>
@@ -788,7 +788,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
                   * 256px panel and the "custom" chip was clipped at the edge. */}
                 {kfCount(prop) > 0 && (
                   <div className="flex items-center gap-1">
-                    <span className="shrink-0 text-[9px] text-neutral-600">Easing</span>
+                    <span className="shrink-0 text-[9px] text-neutral-600">{t("insp.easing")}</span>
                     {(["smooth", "linear", "hold", "bezier"] as const).map((mode) => (
                       <button
                         key={mode}
@@ -814,7 +814,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
                     <button
                       onClick={() => setCurveOpen((o) => ({ ...o, [prop]: !o[prop] }))}
                       className="self-start rounded border border-neutral-800 bg-neutral-900 px-1.5 py-0.5 text-[9px] text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300 transition-colors"
-                      title="Show the value-vs-frame curve for this property"
+                      title={t("insp.showCurve")}
                     >
                       {curveOpen[prop] ? "▴ Curve" : "▾ Curve"}
                     </button>
@@ -835,7 +835,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
 
       {/* ── SWAP MEDIA ── */}
       {showTransformSections && (
-        <CollapsibleSection label="Swap Media" open={swapOpen} onToggle={() => { setSwapOpen((v) => !v); setSwapArmed(false); }}>
+        <CollapsibleSection label={t("lb.swapMedia")} open={swapOpen} onToggle={() => { setSwapOpen((v) => !v); setSwapArmed(false); }}>
           {!swapArmed ? (
             <button
               onClick={() => setSwapArmed(true)}
@@ -847,7 +847,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
             <div className="flex flex-col gap-1">
               <p className="text-[10px] text-neutral-500">Pick replacement ({asset?.type ?? clip.mediaType}):</p>
               {swapCandidates.length === 0 ? (
-                <p className="text-[10px] italic text-neutral-600">No matching assets in library</p>
+                <p className="text-[10px] italic text-neutral-600">{t("insp.noMatchingAssets")}</p>
               ) : (
                 <div className="flex max-h-36 flex-col gap-1 overflow-y-auto">
                   {swapCandidates.map((m) => (
@@ -874,12 +874,12 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
 
       {/* ── actions ── */}
       <div className="px-3 py-3">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-neutral-500">Actions</div>
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-neutral-500">{t("insp.actions")}</div>
         {/* Grid stays symmetric for every clip type: full-width rows span both columns and the
           * pair rows are ordered so no row is left with an orphan empty cell. */}
         <div className="grid grid-cols-2 gap-1.5">
           <ActionButton
-            label="Split at playhead"
+            label={t("lb.splitAtPlayhead")}
             disabled={!canSplit}
             onClick={() => callTool("split_clip", { clipId: clip.id, atFrame: playhead })}
             className={isText || isAudio || isAdjustment ? "col-span-2" : ""}
@@ -887,18 +887,18 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
           {/* AI media actions are hidden (not just disabled) on text/audio clips — offering
             * "Upscale" on a caption reads as broken to a first-time user. */}
           {!isText && !isAudio && !isAdjustment && (
-            <ActionButton label="Upscale" disabled={!canGenerate} onClick={() => callTool("upscale_media", { mediaRef: clip.mediaRef })} />
+            <ActionButton label={t("lb.upscale")} disabled={!canGenerate} onClick={() => callTool("upscale_media", { mediaRef: clip.mediaRef })} />
           )}
           {isVideo && (
             <ActionButton
-              label="Reframe"
+              label={t("lb.reframe")}
               disabled={!canGenerate}
               onClick={() => callTool("reframe", { mediaRef: clip.mediaRef, aspectRatio: "9:16" })}
             />
           )}
           {!isText && !isAudio && !isAdjustment && (
             <ActionButton
-              label="Remove BG"
+              label={t("lb.removeBg")}
               disabled={!canGenerate}
               onClick={() => callTool("remove_background", { mediaRef: clip.mediaRef })}
               className={isVideo ? "" : "col-span-2"}
@@ -921,7 +921,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
           )}
           {asset?.generationInput && (
             <ActionButton
-              label="Regenerate"
+              label={t("lb.regenerate")}
               disabled={!canGenerate}
               onClick={() => regenerate(asset!, callTool)}
               className="col-span-2"
@@ -933,18 +933,18 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
       {/* ── look (one-tap color filter) — video / image only ── */}
       {showAdjust && (
         <div className="flex flex-col gap-2 border-b border-neutral-800 px-3 py-3">
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">Look</span>
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">{t("insp.look")}</span>
           <div className="grid grid-cols-2 gap-1.5">
             <button
               onClick={() => { if (activeLook !== null) applyLook(null); }}
-              title="No look filter"
+              title={t("insp.noLook")}
               className={`truncate rounded border px-2 py-1 text-left text-[10px] font-medium transition-colors ${
                 activeLook === null
                   ? "border-sky-600 bg-sky-900/40 text-sky-300"
                   : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
               }`}
             >
-              None
+              {t("common.none")}
             </button>
             {Object.entries(LOOKS).map(([name, recipe]) => (
               <button
@@ -963,7 +963,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
           </div>
           {activeLook !== null && (
             <SliderField
-              label="Amount"
+              label={t("lb.amount")}
               value={lookAmount}
               min={0}
               max={1}
@@ -1005,18 +1005,18 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
           </div>
 
           {/* color grade sliders */}
-          <GradeSlider label="Exposure"   value={cgExposure}    min={-3}    max={3}     step={0.05} onChange={(v) => { setCgExposure(v);    applyColor("exposure",    v); }} />
-          <GradeSlider label="Contrast"   value={cgContrast}    min={0.5}   max={1.5}   step={0.01} onChange={(v) => { setCgContrast(v);    applyColor("contrast",    v); }} />
-          <GradeSlider label="Saturation" value={cgSaturation}  min={0}     max={2}     step={0.01} onChange={(v) => { setCgSaturation(v);  applyColor("saturation",  v); }} />
-          <GradeSlider label="Temp (K)"   value={cgTemperature} min={2000}  max={11000} step={100}  onChange={(v) => { setCgTemperature(v); applyColor("temperature", v); }} decimals={0} />
-          <GradeSlider label="Tint"       value={cgTint}        min={-100}  max={100}   step={1}    onChange={(v) => { setCgTint(v);        applyColor("tint",        v); }} decimals={0} />
-          <GradeSlider label="Highlights" value={cgHighlights}  min={-1}    max={1}     step={0.02} onChange={(v) => { setCgHighlights(v);  applyColor("highlights",  v); }} />
-          <GradeSlider label="Shadows"    value={cgShadows}     min={-1}    max={1}     step={0.02} onChange={(v) => { setCgShadows(v);     applyColor("shadows",     v); }} />
-          <GradeSlider label="Gamma"      value={cgGamma}       min={0.5}   max={2}     step={0.01} onChange={(v) => { setCgGamma(v);       applyColor("gamma",       v); }} />
+          <GradeSlider label={t("lb.exposure")}   value={cgExposure}    min={-3}    max={3}     step={0.05} onChange={(v) => { setCgExposure(v);    applyColor("exposure",    v); }} />
+          <GradeSlider label={t("lb.contrast")}   value={cgContrast}    min={0.5}   max={1.5}   step={0.01} onChange={(v) => { setCgContrast(v);    applyColor("contrast",    v); }} />
+          <GradeSlider label={t("lb.saturation")} value={cgSaturation}  min={0}     max={2}     step={0.01} onChange={(v) => { setCgSaturation(v);  applyColor("saturation",  v); }} />
+          <GradeSlider label={t("lb.temp")}   value={cgTemperature} min={2000}  max={11000} step={100}  onChange={(v) => { setCgTemperature(v); applyColor("temperature", v); }} decimals={0} />
+          <GradeSlider label={t("lb.tint")}       value={cgTint}        min={-100}  max={100}   step={1}    onChange={(v) => { setCgTint(v);        applyColor("tint",        v); }} decimals={0} />
+          <GradeSlider label={t("lb.highlights")} value={cgHighlights}  min={-1}    max={1}     step={0.02} onChange={(v) => { setCgHighlights(v);  applyColor("highlights",  v); }} />
+          <GradeSlider label={t("lb.shadows")}    value={cgShadows}     min={-1}    max={1}     step={0.02} onChange={(v) => { setCgShadows(v);     applyColor("shadows",     v); }} />
+          <GradeSlider label={t("lb.gamma")}      value={cgGamma}       min={0.5}   max={2}     step={0.01} onChange={(v) => { setCgGamma(v);       applyColor("gamma",       v); }} />
 
           {/* effects chips */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] text-neutral-500">Effects</span>
+            <span className="text-[10px] text-neutral-500">{t("insp.effects")}</span>
             <div className="flex flex-wrap gap-1.5">
               {/* glow renders in the per-clip tail, which adjustment layers bypass — hide its chip there */}
               {((isAdjustment ? ["vignette", "grain", "blur", "sharpen"] : ["vignette", "grain", "blur", "sharpen", "glow"]) as readonly string[]).map((type) => {
@@ -1043,21 +1043,21 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
       {/* ── voice fx — clips that carry audio ── */}
       {showVolume && (
         <div className="flex flex-col gap-2 border-b border-neutral-800 px-3 py-3">
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">Voice FX</span>
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">{t("insp.voiceFx")}</span>
           <select
             value={voiceType}
             onChange={(e) => setVoiceFx(e.target.value as VoiceFxType)}
             className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-sky-600"
           >
-            <option value="none">None</option>
-            <option value="pitch">Pitch</option>
-            <option value="robot">Robot</option>
-            <option value="echo">Echo</option>
-            <option value="radio">Radio</option>
+            <option value="none">{t("common.none")}</option>
+            <option value="pitch">{t("insp.pitch")}</option>
+            <option value="robot">{t("insp.robot")}</option>
+            <option value="echo">{t("insp.echo")}</option>
+            <option value="radio">{t("insp.radio")}</option>
           </select>
           {voiceType === "pitch" && (
             <SliderField
-              label="Pitch"
+              label={t("lb.pitch")}
               value={pitchSemitones}
               min={-12}
               max={12}
@@ -1072,7 +1072,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
           )}
           {voiceType === "echo" && (
             <SliderField
-              label="Delay"
+              label={t("lb.delay")}
               value={echoSeconds}
               min={0.05}
               max={1.5}
@@ -1194,20 +1194,20 @@ function AssetInspector({ asset, playhead, canGenerate }: AssetInspectorProps) {
             Generation
           </div>
           {genInput.model && (
-            <DetailRow label="Model">
+            <DetailRow label={t("lb.model")}>
               <span className="font-mono text-[10px]">{genInput.model}</span>
             </DetailRow>
           )}
           {genInput.prompt && (
             <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-neutral-500">Prompt</span>
+              <span className="text-[10px] text-neutral-500">{t("insp.prompt")}</span>
               <p className="text-[11px] leading-relaxed text-neutral-300 break-words whitespace-pre-wrap">
                 {genInput.prompt}
               </p>
             </div>
           )}
           {asset.durationSeconds != null && (
-            <DetailRow label="Duration">{asset.durationSeconds.toFixed(1)} s</DetailRow>
+            <DetailRow label={t("lb.duration")}>{asset.durationSeconds.toFixed(1)} s</DetailRow>
           )}
         </div>
       )}
@@ -1224,10 +1224,10 @@ function AssetInspector({ asset, playhead, canGenerate }: AssetInspectorProps) {
 
       {/* ── actions ── */}
       <div className="px-3 py-3">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-neutral-500">Actions</div>
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-neutral-500">{t("insp.actions")}</div>
         <div className="grid grid-cols-2 gap-1.5">
           <ActionButton
-            label="Upscale"
+            label={t("lb.upscale")}
             disabled={!canGenerate || isAudio}
             onClick={() => callTool("upscale_media", { mediaRef: asset.id })}
           />
@@ -1246,41 +1246,41 @@ function AssetInspector({ asset, playhead, canGenerate }: AssetInspectorProps) {
                 <option value="4:5">4:5</option>
               </select>
               <ActionButton
-                label="Reframe"
+                label={t("lb.reframe")}
                 disabled={!canGenerate}
                 onClick={() => callTool("reframe", { mediaRef: asset.id, aspectRatio: reframeAspect })}
               />
             </div>
           ) : (
             <ActionButton
-              label="Reframe"
+              label={t("lb.reframe")}
               disabled={true}
               onClick={() => {}}
             />
           )}
           <ActionButton
-            label="Remove BG"
+            label={t("lb.removeBg")}
             disabled={!canGenerate || isAudio}
             onClick={() => callTool("remove_background", { mediaRef: asset.id })}
             className={isAudio ? "col-span-2" : ""}
           />
           {isImage && (
             <ActionButton
-              label="Outpaint"
+              label={t("lb.outpaint")}
               disabled={!canGenerate}
               onClick={() => callTool("outpaint_image", { mediaRef: asset.id })}
             />
           )}
           {isVideo && (
             <ActionButton
-              label="Analyze"
+              label={t("lb.analyze")}
               disabled={!canGenerate}
               onClick={() => callTool("analyze_video", { mediaRef: asset.id })}
             />
           )}
           {genInput && (
             <ActionButton
-              label="Regenerate"
+              label={t("lb.regenerate")}
               disabled={!canGenerate}
               onClick={() => regenerate(asset, callTool)}
               className="col-span-2"

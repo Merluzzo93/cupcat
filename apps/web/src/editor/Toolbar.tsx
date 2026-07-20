@@ -133,7 +133,7 @@ export function Toolbar() {
       <button
         onClick={() => setShowProjects(true)}
         className="truncate rounded px-1.5 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-        title="Switch or create a project"
+        title={t("tb.switchProject")}
       >
         {project?.name ?? "—"} ▾
       </button>
@@ -150,7 +150,7 @@ export function Toolbar() {
       <button
         type="button"
         onClick={() => setShowConn(true)}
-        title="Connections — Claude & Higgsfield"
+        title={t("tb.connectionsHint")}
         className="inline-flex items-center gap-2 rounded-full border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-300 hover:bg-neutral-800"
       >
         <span className={`h-1.5 w-1.5 rounded-full ${agentHasKey ? "bg-emerald-400" : "bg-red-400"}`} />
@@ -163,10 +163,10 @@ export function Toolbar() {
 
       {/* Icon-only with tooltips: ↺/↻ are universal, and the saved width is what lets the whole
         * toolbar fit a single row at 1920 (it used to wrap even there). */}
-      <button onClick={() => sendCommand("undo", {})} className="rounded px-2 py-1 text-xs hover:bg-neutral-800" title="Undo (Ctrl+Z)">
+      <button onClick={() => sendCommand("undo", {})} className="rounded px-2 py-1 text-xs hover:bg-neutral-800" title={t("tl.undo")}>
         ↺
       </button>
-      <button onClick={() => sendCommand("redo", {})} className="rounded px-2 py-1 text-xs hover:bg-neutral-800" title="Redo (Ctrl+Shift+Z)">
+      <button onClick={() => sendCommand("redo", {})} className="rounded px-2 py-1 text-xs hover:bg-neutral-800" title={t("tl.redo")}>
         ↻
       </button>
       <button
@@ -184,7 +184,7 @@ export function Toolbar() {
         {t("toolbar.text")}
       </button>
       <span className="inline-flex items-center overflow-hidden rounded hover:bg-neutral-800">
-        <button onClick={addMatte} className="px-2 py-1 text-xs" title="Add a solid-color background clip at the playhead (uses the swatch color)">
+        <button onClick={addMatte} className="px-2 py-1 text-xs" title={t("tb.matteHint")}>
           {t("toolbar.matte")}
         </button>
         <input
@@ -192,7 +192,7 @@ export function Toolbar() {
           value={matteColor}
           onChange={(e) => setMatteColor(e.target.value)}
           className="h-4 w-4 cursor-pointer border-0 bg-transparent p-0"
-          title="Matte color for the next + Matte"
+          title={t("tb.matteColor")}
         />
       </span>
       {/* Icon-only advanced actions (tooltips carry the words): the labelled versions were the
@@ -200,7 +200,7 @@ export function Toolbar() {
       <button
         onClick={captureFrame}
         className={`rounded px-2 py-1 text-xs hover:bg-neutral-800 ${frameSaved ? "text-emerald-300" : ""}`}
-        title="Frame — capture the current frame to the library"
+        title={t("tb.frameHint")}
       >
         {frameSaved ? "✓ Saved" : "⎙"}
       </button>
@@ -210,7 +210,7 @@ export function Toolbar() {
           if (name !== null) void mcpCall("save_version", { name: name.trim() || "checkpoint" });
         }}
         className="rounded px-2 py-1 text-xs hover:bg-neutral-800"
-        title="Version — save a named snapshot of the whole project (restore it anytime from chat: 'ripristina la versione …')"
+        title={t("tb.versionHint")}
       >
         ⛨
       </button>
@@ -218,12 +218,12 @@ export function Toolbar() {
         onClick={() => selectedClipIds[0] && mcpCall("save_range_as_media", { clipId: selectedClipIds[0] })}
         disabled={!selectedClipIds.length}
         className="rounded px-2 py-1 text-xs hover:bg-neutral-800 disabled:opacity-40"
-        title="Bake — flatten the selected clip into a new reusable library asset"
+        title={t("tb.bakeHint")}
       >
         ⤓
       </button>
 
-      <span className="ml-2 font-mono text-xs text-neutral-400" title="min:sec:frame — the last number counts FRAMES, not hundredths">
+      <span className="ml-2 font-mono text-xs text-neutral-400" title={t("tb.timecodeHint")}>
         {frameToTimecode(playhead, fps)} / {frameToTimecode(total, fps)}
       </span>
 
@@ -233,7 +233,7 @@ export function Toolbar() {
       <div className="ml-auto flex items-center gap-2">
         <button
           type="button"
-          title="Timeline zoom out"
+          title={t("tb.zoomOut")}
           onClick={() => ui.setZoom(Math.max(0.2, pxPerFrame / 1.4))}
           className="flex h-5 w-5 items-center justify-center rounded text-neutral-300 hover:bg-neutral-700"
         >
@@ -246,12 +246,12 @@ export function Toolbar() {
           step={0.1}
           value={pxPerFrame}
           onChange={(e) => ui.setZoom(Number(e.target.value))}
-          title="Timeline zoom"
+          title={t("tb.zoom")}
           className="w-16 accent-neutral-400"
         />
         <button
           type="button"
-          title="Timeline zoom in"
+          title={t("tb.zoomIn")}
           onClick={() => ui.setZoom(Math.min(10, pxPerFrame * 1.4))}
           className="flex h-5 w-5 items-center justify-center rounded text-neutral-300 hover:bg-neutral-700"
         >
@@ -261,9 +261,9 @@ export function Toolbar() {
         <div className="mx-1 h-5 w-px bg-neutral-800" />
 
         {/* Panel visibility toggles */}
-        <PanelBtn label="Chat" active={panels.chat} onClick={() => ui.togglePanel("chat")} />
-        <PanelBtn label="Library" active={panels.media} onClick={() => ui.togglePanel("media")} />
-        <PanelBtn label="Inspector" active={panels.inspector} onClick={() => ui.togglePanel("inspector")} />
+        <PanelBtn label={t("toolbar.chat")} active={panels.chat} onClick={() => ui.togglePanel("chat")} />
+        <PanelBtn label={t("toolbar.library")} active={panels.media} onClick={() => ui.togglePanel("media")} />
+        <PanelBtn label={t("toolbar.inspector")} active={panels.inspector} onClick={() => ui.togglePanel("inspector")} />
 
         {/* Maximize preview toggle */}
         <button
@@ -279,7 +279,7 @@ export function Toolbar() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <button onClick={() => setShowHelp(true)} className="rounded px-2 py-1 text-xs hover:bg-neutral-800" title="Getting started, shortcuts, glossary, and how to connect an agent">
+        <button onClick={() => setShowHelp(true)} className="rounded px-2 py-1 text-xs hover:bg-neutral-800" title={t("tb.helpHint")}>
           {t("toolbar.help")}
         </button>
         <button
@@ -293,7 +293,7 @@ export function Toolbar() {
         <button
           onClick={() => setShowFeedback(true)}
           className="rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
-          title="Feedback — report a bug or send an idea to the developer"
+          title={t("tb.feedbackHint")}
         >
           💬
         </button>
@@ -304,7 +304,7 @@ export function Toolbar() {
               const [w, h] = e.target.value.split("x").map(Number);
               if (w && h) sendCommand("set_project_format", { width: w, height: h });
             }}
-            title="Canvas format / aspect ratio — used by both the preview and the export"
+            title={t("tb.canvasFormat")}
             className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-neutral-300 outline-none hover:bg-neutral-800"
           >
             {!formatPresets.some((p) => p.value === curFormat) && <option value={curFormat}>{curFormat.replace("x", "×")}</option>}
@@ -325,7 +325,7 @@ export function Toolbar() {
               void mcpCall("merge_clips", {});
           }}
           disabled={!project}
-          title="Flatten all clips/segments into a single continuous clip"
+          title={t("tb.mergeHint")}
           className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
         >
           {t("toolbar.merge")}
@@ -333,7 +333,7 @@ export function Toolbar() {
         <button
           onClick={() => setShowBeatSync(true)}
           disabled={!project}
-          title="Beat Sync: trim clips so every cut lands on a beat of a music track"
+          title={t("tb.beatSyncHint")}
           className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
         >
           ♫ {t("toolbar.beatSync")}
@@ -341,7 +341,7 @@ export function Toolbar() {
         <button
           onClick={() => setShowClips(true)}
           disabled={!project}
-          title="AI Clips: automatically find the most viral moments of a long video and export them as vertical shorts with captions"
+          title={t("tb.aiClipsHint")}
           className="rounded border border-violet-500/60 bg-violet-600/20 px-3 py-1 text-xs font-medium text-violet-200 hover:bg-violet-600/35 disabled:opacity-40"
         >
           {t("toolbar.aiClips")}
@@ -482,7 +482,7 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
   };
 
   return (
-    <Modal title="Export" onClose={onClose}>
+    <Modal title={t("tb.exportHint")} onClose={onClose}>
       <div className="space-y-3 text-xs">
         {blackTailSec > 0.5 && (
           <div className="rounded border border-amber-800 bg-amber-950/40 p-2 text-amber-200">
@@ -492,7 +492,7 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
         )}
         <div className="grid grid-cols-2 gap-2">
           <label className="block">
-            <span className="mb-1 block text-neutral-400">Resolution</span>
+            <span className="mb-1 block text-neutral-400">{t("details.resolution")}</span>
             <select
               value={EXPORT_RESOLUTIONS.some((r) => `${r.w}x${r.h}` === res) ? res : "__cur"}
               onChange={(e) => e.target.value !== "__cur" && setRes(e.target.value)}
@@ -507,7 +507,7 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
             </select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-neutral-400">Frame rate</span>
+            <span className="mb-1 block text-neutral-400">{t("details.frameRate")}</span>
             <select
               value={outFps}
               onChange={(e) => setOutFps(Number(e.target.value))}
@@ -523,7 +523,7 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
           </label>
         </div>
         <label className="block">
-          <span className="mb-1 block text-neutral-400">Format</span>
+          <span className="mb-1 block text-neutral-400">{t("clips.format")}</span>
           <select
             value={format}
             onChange={(e) => setFormat(e.target.value)}
@@ -537,20 +537,20 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
           </select>
         </label>
         <label className="block">
-          <span className="mb-1 block text-neutral-400">Quality</span>
+          <span className="mb-1 block text-neutral-400">{t("exp.quality")}</span>
           <select
             value={quality}
             onChange={(e) => setQuality(e.target.value)}
             className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 outline-none"
           >
-            <option value="draft">Draft — smallest file</option>
-            <option value="standard">Standard</option>
-            <option value="high">High (recommended)</option>
-            <option value="max">Max — near-lossless</option>
+            <option value="draft">{t("exp.qualityDraft")}</option>
+            <option value="standard">{t("exp.qualityStandard")}</option>
+            <option value="high">{t("exp.qualityHigh")}</option>
+            <option value="max">{t("exp.qualityMax")}</option>
           </select>
         </label>
         <label className="block">
-          <span className="mb-1 block text-neutral-400">File name</span>
+          <span className="mb-1 block text-neutral-400">{t("exp.fileName")}</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -590,7 +590,7 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
                 {/* Publish assist: local-only helper — opens the platform's upload page so the user
                   * drags the exported file in (no accounts/APIs are ever connected from here). */}
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-neutral-800 pt-2 text-[11px] text-neutral-400">
-                  <span>Post it:</span>
+                  <span>{t("exp.postIt")}</span>
                   {[
                     { label: "YouTube", url: "https://studio.youtube.com/channel/upload" },
                     { label: "TikTok", url: "https://www.tiktok.com/tiktokstudio/upload" },
@@ -823,7 +823,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               <label className="flex min-w-0 flex-1 flex-col gap-1">
                 <span className="text-neutral-400">{t("clips.preset")}</span>
                 <select value={kitName} onChange={(e) => applyKit(e.target.value)} className={inputCls} disabled={busy}>
-                  <option value="">None</option>
+                  <option value="">{t("common.none")}</option>
                   {kits.map((k) => (
                     <option key={k.name} value={k.name}>
                       {k.name}
@@ -834,7 +834,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               <button
                 onClick={saveKit}
                 disabled={busy}
-                title="Save the current caption style, title overlay, format and watermark as a reusable preset"
+                title={t("tb.savePresetHint")}
                 className="shrink-0 rounded border border-neutral-700 px-2 py-1.5 text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
               >
                 {t("clips.savePreset")}
@@ -842,7 +842,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               <button
                 onClick={deleteKit}
                 disabled={busy || !kitName}
-                title="Delete the selected preset"
+                title={t("tb.deletePreset")}
                 className="shrink-0 rounded border border-neutral-700 px-2.5 py-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-red-400 disabled:opacity-40"
               >
                 {t("common.delete")}
@@ -884,10 +884,10 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               <label className="flex flex-col gap-1">
                 <span className="text-neutral-400">{t("clips.captionStyle")}</span>
                 <select value={capStyle} onChange={(e) => setCapStyle(e.target.value)} className={inputCls} disabled={busy || !captions}>
-                  <option value="karaoke">Karaoke — yellow active word</option>
-                  <option value="clean">Clean — bold white</option>
-                  <option value="boxed">Boxed — white on dark box</option>
-                  <option value="minimal">Minimal — small subtitles</option>
+                  <option value="karaoke">{t("cap.karaoke")}</option>
+                  <option value="clean">{t("cap.clean")}</option>
+                  <option value="boxed">{t("cap.boxed")}</option>
+                  <option value="minimal">{t("cap.minimal")}</option>
                 </select>
               </label>
             </div>
@@ -896,7 +896,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
                 <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} disabled={busy} />
                 {t("clips.captions")}
               </label>
-              <label className="flex items-center gap-2 text-neutral-300" title="Burns the AI title at the top of the clip for the first seconds">
+              <label className="flex items-center gap-2 text-neutral-300" title={t("tb.titleOverlayHint")}>
                 <input type="checkbox" checked={titleOverlay} onChange={(e) => setTitleOverlay(e.target.checked)} disabled={busy} />
                 {t("clips.titleOverlay")}
               </label>
@@ -931,7 +931,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
                       type="button"
                       onClick={() => setWatermark("")}
                       disabled={busy}
-                      title="Remove the logo"
+                      title={t("tb.removeLogo")}
                       className="shrink-0 rounded px-1.5 py-1 text-neutral-500 hover:bg-neutral-800 hover:text-red-400 disabled:opacity-40"
                     >
                       ✕
@@ -1087,10 +1087,10 @@ function BeatSyncDialog({ onClose }: { onClose: () => void }) {
   const lowConfidence = detection !== null && detection.confidence < MIN_BEAT_CONFIDENCE;
 
   return (
-    <Modal title="♫ Beat Sync — cut to the music" onClose={onClose}>
+    <Modal title={t("tb.beatSyncTitle")} onClose={onClose}>
       <div className="flex max-h-[78vh] flex-col gap-3 overflow-y-auto text-xs">
         <label className="flex flex-col gap-1">
-          <span className="text-neutral-400">Music</span>
+          <span className="text-neutral-400">{t("beat.music")}</span>
           <select value={media} onChange={(e) => pickMedia(e.target.value)} className={inputCls} disabled={busy}>
             {audios.length === 0 && <option value="">(no audio in the library)</option>}
             {audios.map((a) => (
@@ -1102,15 +1102,15 @@ function BeatSyncDialog({ onClose }: { onClose: () => void }) {
         </label>
         <div className="grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-400">Cut every</span>
+            <span className="text-neutral-400">{t("tb.cutEvery")}</span>
             <select value={beatEvery} onChange={(e) => setBeatEvery(Number(e.target.value))} className={inputCls} disabled={busy}>
-              <option value={1}>Every beat</option>
+              <option value={1}>{t("beat.every")}</option>
               <option value={2}>Every 2 beats</option>
               <option value={4}>Every 4 beats (bar)</option>
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-400">Min clip (s)</span>
+            <span className="text-neutral-400">{t("beat.minClip")}</span>
             <input
               type="number"
               min={0.2}
@@ -1178,33 +1178,33 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
   const cmd = `claude mcp add --transport http cupcat ${BRIDGE_HTTP}/mcp`;
   const h = "mb-1 mt-3 block text-[11px] font-semibold uppercase tracking-wide text-neutral-400";
   return (
-    <Modal title="Help" onClose={onClose}>
+    <Modal title={t("toolbar.help")} onClose={onClose}>
       <div className="max-h-[70vh] space-y-1 overflow-y-auto text-xs text-neutral-300">
-        <span className={h}>Getting started</span>
+        <span className={h}>{t("help.gettingStarted")}</span>
         <ol className="list-decimal space-y-1 pl-4">
           <li>Drop video/audio/image files into the Library (left) — or just copy them into the project folder.</li>
           <li>Drag media onto the timeline. Click the ruler to move the playhead; Space plays/pauses.</li>
           <li>The fastest way to edit: ask the assistant in the chat panel — "remove the pauses", "make 3 vertical clips", "cut to the music beat".</li>
           <li>Export (top right) renders the timeline; files land in the project's <span className="font-mono">exports/</span> folder.</li>
         </ol>
-        <span className={h}>Shortcuts</span>
+        <span className={h}>{t("help.shortcuts")}</span>
         {/* Editable: click a key chip, press the new combo. Backed by the action registry. */}
         <ShortcutsEditor />
         <ul className="space-y-0.5 pl-1 pt-1">
-          <li><span className="font-mono text-neutral-200">Click ruler</span> — seek · <span className="font-mono text-neutral-200">drag clip edges</span> — trim (<span className="font-mono">Shift</span> = ripple)</li>
-          <li><span className="font-mono text-neutral-200">Double-click preview</span> — select that clip</li>
+          <li><span className="font-mono text-neutral-200">{t("tb.clickRuler")}</span> — seek · <span className="font-mono text-neutral-200">drag clip edges</span> — trim (<span className="font-mono">{t("tb.shift")}</span> = ripple)</li>
+          <li><span className="font-mono text-neutral-200">{t("tb.dblClickPreview")}</span> — select that clip</li>
           <li>Markers: right-click a marker flag to edit its note or delete it</li>
         </ul>
-        <span className={h}>Glossary</span>
+        <span className={h}>{t("help.glossary")}</span>
         <ul className="space-y-0.5 pl-1">
-          <li><b>Split</b> — cut the selected clip in two at the playhead (playhead must be inside it).</li>
-          <li><b>Matte</b> — a solid-color background clip (use the swatch to pick the color).</li>
-          <li><b>Bake</b> — flatten the selected clip (with effects/speed) into a new library asset.</li>
-          <li><b>Merge</b> — render the whole timeline into ONE clip that replaces it.</li>
-          <li><b>AI Clips</b> — auto-find the best moments of a long video and export them as vertical shorts.</li>
-          <li><b>Timecode</b> — shown as min:sec:<i>frame</i> (the last number is frames, not hundredths).</li>
+          <li><b>{t("toolbar.split")}</b> — cut the selected clip in two at the playhead (playhead must be inside it).</li>
+          <li><b>{t("toolbar.matte")}</b> — a solid-color background clip (use the swatch to pick the color).</li>
+          <li><b>{t("tb.bake")}</b> — flatten the selected clip (with effects/speed) into a new library asset.</li>
+          <li><b>{t("toolbar.merge")}</b> — render the whole timeline into ONE clip that replaces it.</li>
+          <li><b>{t("toolbar.aiClips")}</b> — auto-find the best moments of a long video and export them as vertical shorts.</li>
+          <li><b>{t("tb.timecode")}</b> — shown as min:sec:<i>frame</i> (the last number is frames, not hundredths).</li>
         </ul>
-        <span className={h}>Connect an external agent (advanced)</span>
+        <span className={h}>{t("help.connectAgent")}</span>
         <p>CupCat runs a local MCP server — Claude Code, Cursor or Claude Desktop can edit this project with full context:</p>
         <code className="block break-all rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 font-mono text-[11px] text-neutral-200">{cmd}</code>
         <p className="text-[11px] text-neutral-500">
@@ -1264,20 +1264,20 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
         {!path ? (
           <>
             <label className="block">
-              <span className="mb-1 block text-neutral-400">Tipo</span>
+              <span className="mb-1 block text-neutral-400">{t("feedback.type")}</span>
               <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls} disabled={busy}>
-                <option value="bug">Bug</option>
-                <option value="idea">Idea</option>
-                <option value="other">Altro</option>
+                <option value="bug">{t("fb.typeBug")}</option>
+                <option value="idea">{t("fb.typeIdea")}</option>
+                <option value="other">{t("fb.typeOther")}</option>
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-neutral-400">Descrizione</span>
+              <span className="mb-1 block text-neutral-400">{t("feedback.description")}</span>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={4}
-                placeholder="Cosa è successo? Cosa ti aspettavi?"
+                placeholder={t("feedback.descriptionPlaceholder")}
                 className={`${inputCls} resize-y`}
                 disabled={busy}
               />
@@ -1488,7 +1488,7 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
     setBusy(false);
   };
   return (
-    <Modal title="Projects" onClose={onClose}>
+    <Modal title={t("tb.projectsHint")} onClose={onClose}>
       <div className="space-y-3 text-xs">
         <div className="max-h-60 space-y-1 overflow-y-auto">
           {projects.length === 0 && <p className="text-neutral-500">No projects yet.</p>}
@@ -1511,7 +1511,7 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
               <button
                 onClick={() => del(p.path, p.name)}
                 disabled={busy}
-                title="Delete project (removes its folder + media)"
+                title={t("tb.deleteProject")}
                 className="px-2 py-2 text-neutral-500 hover:text-red-400 disabled:opacity-40"
               >
                 🗑
@@ -1536,13 +1536,13 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && newName.trim() && createNew()}
-            placeholder="or new project name"
+            placeholder={t("tb.newProjectName")}
             className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 outline-none"
           />
           <button
             onClick={() => createNew()}
             disabled={busy || !newName.trim()}
-            title="Choose where to create the project folder"
+            title={t("tb.chooseFolder")}
             className="rounded-md bg-neutral-200 px-3 py-1 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
           >
             Create…

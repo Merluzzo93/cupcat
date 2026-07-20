@@ -3,6 +3,7 @@
 // (which frees the combo from its previous owner). Overrides persist via actions.ts → localStorage.
 
 import { useEffect, useState } from "react";
+import { t } from "./i18n";
 import {
   comboFromEvent,
   conflictOf,
@@ -79,7 +80,7 @@ export function ShortcutsEditor() {
                     setPending(null);
                     setCapturing(capturing === a.id ? null : a.id);
                   }}
-                  title="Click, then press the new key combo (Esc cancels)"
+                  title={t("sc.pressCombo")}
                   className={`min-w-[72px] rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
                     capturing === a.id
                       ? "border-sky-600 bg-sky-900/40 text-sky-300"
@@ -95,7 +96,7 @@ export function ShortcutsEditor() {
                     apply(next);
                   }}
                   disabled={!customized}
-                  title="Reset this shortcut to its default"
+                  title={t("sc.reset")}
                   className="rounded px-1 py-0.5 text-[10px] text-neutral-600 transition-colors hover:bg-neutral-800 hover:text-neutral-300 disabled:invisible"
                 >
                   ↺

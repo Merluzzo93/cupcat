@@ -7,6 +7,7 @@
 // The pure mapping helpers below are exported for unit tests (KeyframeCurveEditor.test.ts).
 
 import { useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import { BEZIER_DEFAULT_IN, BEZIER_DEFAULT_OUT, segmentProgress } from "@cupcat/editor-core";
 import type { AnimPair, Clip, Keyframe } from "@cupcat/editor-core";
 import { pairRows, scalarRows } from "./kfRows";
@@ -279,7 +280,7 @@ export function KeyframeCurveEditor({
     <div ref={measure} className="flex w-full flex-col gap-1">
       {pair && (
         <div className="flex items-center gap-1">
-          <span className="text-[9px] text-neutral-600">Channel</span>
+          <span className="text-[9px] text-neutral-600">{t("kf.channel")}</span>
           {(["a", "b"] as const).map((c) => (
             <button
               key={c}
@@ -330,7 +331,7 @@ export function KeyframeCurveEditor({
                 >
                   ✎
                 </text>
-                <title>Make this segment a custom bezier curve</title>
+                <title>{t("kf.customBezier")}</title>
               </g>
             );
           }

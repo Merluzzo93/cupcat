@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "./i18n";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import type { Clip, Crop, Effect, Project, Transform } from "@cupcat/editor-core";
 import { lerpAnimPair, lerpNumber, sampleTrack, scaledLook, splitStyleSegments, timelineTotalFrames, transformTopLeft } from "@cupcat/editor-core";
@@ -1150,7 +1151,7 @@ function SourceViewer({ assetId }: { assetId: string }) {
             <span className="text-xs text-neutral-400">{asset.name}</span>
           </div>
         ) : (
-          <span className="text-xs text-neutral-500">Unsupported media type</span>
+          <span className="text-xs text-neutral-500">{t("prev.unsupported")}</span>
         )}
       </div>
     </div>
@@ -1618,7 +1619,7 @@ export function Preview() {
 
       {/* Palmier-style view tabs: Timeline first, then one tab per open source asset */}
       <div className="flex h-8 shrink-0 items-stretch gap-0.5 overflow-x-auto border-b border-neutral-800 bg-neutral-900/60 px-2 [scrollbar-width:none]">
-        <ViewTab active={!sourceAssetId} label="Timeline" onClick={() => ui.showTimelineTab()} />
+        <ViewTab active={!sourceAssetId} label={t("timeline.title")} onClick={() => ui.showTimelineTab()} />
         {openSourceIds.map((id) => {
           const a = project?.media.find((m) => m.id === id);
           return (
@@ -1649,7 +1650,7 @@ export function Preview() {
           <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded bg-neutral-800/90 px-1.5 py-0.5 text-xs text-neutral-300">
             <span>{Math.round(view.zoom * 100)}%</span>
             <button onClick={() => setView({ zoom: 1, x: 0, y: 0 })} className="rounded px-1 hover:bg-neutral-700">
-              Fit
+              {t("prev.fitLabel")}
             </button>
           </div>
         )}
@@ -1723,12 +1724,12 @@ export function Preview() {
 
         {/* CENTER: transport controls */}
         <div className="flex items-center gap-0.5">
-          <button title="Skip to start" onClick={() => ui.setPlayhead(0)} className={btnBase}>
+          <button title={t("prev.skipStart")} onClick={() => ui.setPlayhead(0)} className={btnBase}>
             ⏮
           </button>
           {/* Step buttons use bar-glyph variants so they can't be mistaken for Play (two identical
             * ▶ side by side guaranteed wrong clicks). */}
-          <button title="Step back 1 frame" onClick={() => ui.advance(-1, total)} className={btnBase}>
+          <button title={t("prev.stepBack")} onClick={() => ui.advance(-1, total)} className={btnBase}>
             ◁▏
           </button>
           <button
@@ -1741,10 +1742,10 @@ export function Preview() {
           >
             {playing ? "⏸" : "▶"}
           </button>
-          <button title="Step forward 1 frame" onClick={() => ui.advance(1, total)} className={btnBase}>
+          <button title={t("prev.stepFwd")} onClick={() => ui.advance(1, total)} className={btnBase}>
             ▕▷
           </button>
-          <button title="Skip to end" onClick={() => ui.setPlayhead(total - 1)} className={btnBase}>
+          <button title={t("prev.skipEnd")} onClick={() => ui.setPlayhead(total - 1)} className={btnBase}>
             ⏭
           </button>
         </div>
@@ -1752,21 +1753,21 @@ export function Preview() {
         {/* RIGHT: edit-mode tools + format chips */}
         <div className="flex items-center gap-1">
           <button
-            title="Select"
+            title={t("prev.select")}
             onClick={() => ui.setTool("select")}
             className={`${btnBase} ${tool === "select" ? btnActive : ""}`}
           >
             ↖
           </button>
           <button
-            title="Blade"
+            title={t("prev.blade")}
             onClick={() => ui.setTool("blade")}
             className={`${btnBase} ${tool === "blade" ? btnActive : ""}`}
           >
             ✂
           </button>
           <button
-            title="Crop (drag the edges of the selected clip)"
+            title={t("prev.crop")}
             onClick={() => setCropMode((v) => !v)}
             disabled={!selectedClip}
             className={`${btnBase} ${cropMode ? btnActive : ""} disabled:opacity-40`}
@@ -1774,7 +1775,7 @@ export function Preview() {
             ⌗
           </button>
           <button
-            title="Pen mask (click points on the canvas to cut a freeform shape; double-click or Enter applies, Esc exits)"
+            title={t("prev.penMask")}
             onClick={() => setMaskMode((v) => !v)}
             disabled={!selectedClip}
             className={`${btnBase} ${maskMode ? btnActive : ""} disabled:opacity-40`}
@@ -1782,10 +1783,10 @@ export function Preview() {
             ✎
           </button>
           <span className="mx-1 h-4 w-px bg-neutral-800" />
-          <span className="text-[10px] tabular-nums text-neutral-500" title="Project aspect ratio">
+          <span className="text-[10px] tabular-nums text-neutral-500" title={t("prev.aspect")}>
             {aspectLabel}
           </span>
-          <span className="text-[10px] tabular-nums text-neutral-500" title="Project frame rate">
+          <span className="text-[10px] tabular-nums text-neutral-500" title={t("prev.fps")}>
             {Number.isInteger(fps) ? fps : fps.toFixed(2)}
           </span>
           <span className="text-[10px] text-neutral-500" title={`${W}×${H}`}>
@@ -1794,9 +1795,9 @@ export function Preview() {
           <button
             onClick={() => setView({ zoom: 1, x: 0, y: 0 })}
             className="rounded px-1.5 py-0.5 text-[10px] text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
-            title="Fit the canvas (resets viewport zoom)"
+            title={t("prev.fit")}
           >
-            Fit
+            {t("prev.fitLabel")}
           </button>
         </div>
       </div>
@@ -1838,7 +1839,7 @@ function ViewTab({
           className={`rounded p-0.5 leading-none text-neutral-500 transition-opacity hover:bg-neutral-700 hover:text-neutral-200 ${
             active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
-          title="Close"
+          title={t("common.close")}
         >
           <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
             <path d="M6 6l12 12M18 6 6 18" />

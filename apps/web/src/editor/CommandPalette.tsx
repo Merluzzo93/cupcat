@@ -5,6 +5,7 @@
 // this component listens globally to also catch Ctrl+K while the chat composer is focused.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import { loadOverrides, resolveAction } from "./actions";
 import { newChat, sendChat, sendCommand, ui, useEditor } from "./store";
 
@@ -155,7 +156,7 @@ export function CommandPalette() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Type a command, a media name, or a request for the assistant…"
+          placeholder={t("palette.placeholder")}
           className="w-full border-b border-neutral-800 bg-transparent px-4 py-3 text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
         />
         <div className="max-h-[52vh] overflow-y-auto py-1">
@@ -184,7 +185,7 @@ export function CommandPalette() {
           {/* Fallback row: send the typed text to the assistant */}
           {hasQuery && (
             <>
-              <div className="px-4 pb-0.5 pt-2 text-[10px] font-medium uppercase tracking-wide text-neutral-500">Assistant</div>
+              <div className="px-4 pb-0.5 pt-2 text-[10px] font-medium uppercase tracking-wide text-neutral-500">{t("palette.assistant")}</div>
               <button
                 type="button"
                 onMouseEnter={() => setIdx(results.length)}

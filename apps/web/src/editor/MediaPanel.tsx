@@ -38,7 +38,7 @@ function VideoThumb({ assetId, className }: { assetId: string; className?: strin
       {failed && (
         <div
           className="absolute inset-0 flex items-center justify-center bg-neutral-900/70 text-sm text-amber-400"
-          title="Preview unavailable — the source file itself is fine and exports correctly"
+          title={t("media.previewUnavailable")}
         >
           ⚠
         </div>
@@ -322,7 +322,7 @@ export function MediaPanel() {
               dropToFolder(null, e);
             }}
             className="shrink-0 rounded px-1 py-0.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-            title="All media — drop files here to move them to the root"
+            title={t("media.rootDrop")}
           >
             ‹ All
           </button>
@@ -602,7 +602,7 @@ function LibraryToolbar({
             setOpen((v) => !v);
             setError(null);
           }}
-          title="Import files, a folder, a path or a URL"
+          title={t("media.importHint")}
           className={`shrink-0 rounded px-1.5 py-1 text-[11px] transition-colors ${
             open ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
           }`}
@@ -611,7 +611,7 @@ function LibraryToolbar({
         </button>
         <button
           onClick={onNewFolder}
-          title="New folder"
+          title={t("media.newFolder")}
           className="shrink-0 rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -634,10 +634,10 @@ function LibraryToolbar({
           <button
             onClick={onFirstCut}
             disabled={firstCutBusy}
-            title="First Cut — assemble this folder's footage into an editable draft (local, no export)"
+            title={t("media.firstCutHint")}
             className="shrink-0 whitespace-nowrap rounded px-1.5 py-1 text-[11px] text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-50"
           >
-            {firstCutBusy ? "Cutting…" : "✂ First Cut"}
+            {firstCutBusy ? t("media.cutting") : `✂ ${t("media.firstCut")}`}
           </button>
         )}
         <input
@@ -693,7 +693,7 @@ function LibraryToolbar({
             value={source}
             onChange={(e) => setSource(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleImport()}
-            placeholder="File path or URL"
+            placeholder={t("media.pathOrUrl")}
             className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-500"
           />
           {error && <p className="text-[11px] text-red-400">{error}</p>}
@@ -711,19 +711,19 @@ function LibraryToolbar({
               onChange={(e) => setVideoUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void handleUrlImport()}
               disabled={urlBusy}
-              placeholder="Paste video URL…"
+              placeholder={t("media.pasteUrl")}
               className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-500 disabled:opacity-40"
             />
             <button
               onClick={() => void handleUrlImport()}
               disabled={urlBusy || !videoUrl.trim()}
-              title="Download and import"
+              title={t("media.downloadImport")}
               className="shrink-0 rounded-md bg-neutral-800 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-40 transition-colors"
             >
               {urlBusy ? "…" : "⤓"}
             </button>
           </div>
-          {urlBusy && <p className="text-[10px] text-neutral-500">Downloading — this can take a while…</p>}
+          {urlBusy && <p className="text-[10px] text-neutral-500">{t("media.downloading")}</p>}
           {urlError && <p className="text-[11px] text-red-400">{urlError}</p>}
         </div>
       )}
@@ -857,7 +857,7 @@ function MediaCard({
         {ready && (
           <button
             type="button"
-            title="Add as chat reference (@)"
+            title={t("media.addAsRef")}
             onClick={(e) => {
               e.stopPropagation();
               if (!selected) onToggle(asset.id, true);
@@ -1206,7 +1206,7 @@ function GeneratePanel({
         {/* ── references ── */}
         {tab === "image" && selectedAssets.length > 0 && (
           <div className="space-y-1">
-            <span className="text-[10px] text-neutral-500">References</span>
+            <span className="text-[10px] text-neutral-500">{t("media.references")}</span>
             <RefStrip assets={selectedAssets} />
           </div>
         )}
@@ -1216,7 +1216,7 @@ function GeneratePanel({
             {/* first / last frame */}
             <div className="flex gap-1.5">
               <FrameSlot
-                label="First frame"
+                label={t("lb.firstFrame")}
                 assetId={firstFrameId}
                 media={media}
                 onSet={() => {
@@ -1226,7 +1226,7 @@ function GeneratePanel({
                 onClear={() => setFirstFrameId(null)}
               />
               <FrameSlot
-                label="Last frame"
+                label={t("lb.lastFrame")}
                 assetId={lastFrameId}
                 media={media}
                 onSet={() => {
@@ -1239,7 +1239,7 @@ function GeneratePanel({
             {/* remaining refs */}
             {videoRefs.length > 0 && (
               <div className="space-y-1">
-                <span className="text-[10px] text-neutral-500">References</span>
+                <span className="text-[10px] text-neutral-500">{t("media.references")}</span>
                 <RefStrip assets={videoRefs} />
               </div>
             )}
@@ -1250,13 +1250,13 @@ function GeneratePanel({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Name (optional)"
+          placeholder={t("media.nameOptional")}
           className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-600"
         />
 
         {/* prompt */}
         {tab === "audio" && (
-          <span className="block text-[10px] text-neutral-500">Text to speak</span>
+          <span className="block text-[10px] text-neutral-500">{t("media.textToSpeak")}</span>
         )}
         <textarea
           value={prompt}
@@ -1274,7 +1274,7 @@ function GeneratePanel({
 
         {/* dynamic per-model params (voice, voice_id, lyrics, instrumental, …) */}
         {paramsLoading && (
-          <p className="text-[10px] text-neutral-600">Loading model settings…</p>
+          <p className="text-[10px] text-neutral-600">{t("media.loadingSettings")}</p>
         )}
         {!paramsLoading && modelParams.length > 0 && (
           <div className="space-y-1.5">
@@ -1302,7 +1302,7 @@ function GeneratePanel({
                       onChange={(e) => setVal(e.target.value)}
                       className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-neutral-600"
                     >
-                      <option value="true">Yes</option>
+                      <option value="true">{t("common.yes")}</option>
                       <option value="false">No</option>
                     </select>
                   ) : (
@@ -1347,7 +1347,7 @@ function GeneratePanel({
               <div className="absolute bottom-full left-0 z-40 mb-1.5 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-2.5 shadow-2xl">
                 {(tab === "video" || tab === "audio") && (
                   <div className="mb-2">
-                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500">Duration</div>
+                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500">{t("media.duration")}</div>
                     <div className="flex flex-wrap gap-1">
                       {DURATIONS.map((d) => (
                         <button
@@ -1368,7 +1368,7 @@ function GeneratePanel({
                 )}
                 {(tab === "image" || tab === "video") && (
                   <div>
-                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500">Aspect ratio</div>
+                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500">{t("media.aspect")}</div>
                     <div className="flex flex-wrap gap-1">
                       {ASPECT_RATIOS.map((r) => (
                         <button
@@ -1396,8 +1396,8 @@ function GeneratePanel({
             disabled={modelsLoading || models.length === 0}
             className="min-w-0 flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-1.5 py-1 text-[11px] text-neutral-300 outline-none focus:border-neutral-600 disabled:opacity-50"
           >
-            {modelsLoading && <option value="">Loading models…</option>}
-            {!modelsLoading && models.length === 0 && <option value="">No models available</option>}
+            {modelsLoading && <option value="">{t("media.loadingModels")}</option>}
+            {!modelsLoading && models.length === 0 && <option value="">{t("media.noModels")}</option>}
             {models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
@@ -1407,7 +1407,7 @@ function GeneratePanel({
           <button
             type="button"
             onClick={() => setSettingsOpen((v) => !v)}
-            title="Generation settings"
+            title={t("media.genSettings")}
             className={`shrink-0 rounded-md border px-1.5 py-1 text-[10px] tabular-nums transition-colors ${
               settingsOpen
                 ? "border-neutral-500 bg-neutral-800 text-neutral-200"
@@ -1419,7 +1419,7 @@ function GeneratePanel({
           <button
             onClick={handleGenerate}
             disabled={!canSubmit}
-            title="Generate"
+            title={t("media.generate")}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
           >
             {busy ? <Spinner /> : <span className="text-sm leading-none">↑</span>}

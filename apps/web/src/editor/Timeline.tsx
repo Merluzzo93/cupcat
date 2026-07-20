@@ -471,7 +471,7 @@ export function Timeline() {
             type="button"
             onClick={() => sendCommand("close_compound", {})}
             className="rounded px-1.5 py-0.5 font-medium hover:bg-indigo-500/20"
-            title="Chiudi la sequenza e torna alla timeline principale"
+            title={t("tl.closeCompound")}
           >
             ◀ Torna alla timeline principale
           </button>
@@ -481,25 +481,25 @@ export function Timeline() {
       )}
       {/* Palmier-style timeline toolbar: undo/redo · tools · snapping — zoom slider at the right */}
       <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-neutral-800 bg-neutral-900/80 px-2">
-        <TbBtn title="Undo (Ctrl+Z)" onClick={() => sendCommand("undo", {})}>
+        <TbBtn title={t("tl.undo")} onClick={() => sendCommand("undo", {})}>
           <svg {...iconProps} width={13} height={13}>
             <path d="M9 14 4 9l5-5" />
             <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
           </svg>
         </TbBtn>
-        <TbBtn title="Redo (Ctrl+Shift+Z)" onClick={() => sendCommand("redo", {})}>
+        <TbBtn title={t("tl.redo")} onClick={() => sendCommand("redo", {})}>
           <svg {...iconProps} width={13} height={13}>
             <path d="m15 14 5-5-5-5" />
             <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
           </svg>
         </TbBtn>
         <span className="mx-1 h-4 w-px bg-neutral-800" />
-        <TbBtn title="Select tool (V)" active={tool === "select"} onClick={() => ui.setTool("select")}>
+        <TbBtn title={t("tl.selectTool")} active={tool === "select"} onClick={() => ui.setTool("select")}>
           <svg {...iconProps} width={13} height={13} fill="currentColor" strokeWidth={1}>
             <path d="M5 3l7.5 13 2-5.5L20 8.5 5 3Z" />
           </svg>
         </TbBtn>
-        <TbBtn title="Blade tool (B)" active={tool === "blade"} onClick={() => ui.setTool("blade")}>
+        <TbBtn title={t("tl.bladeTool")} active={tool === "blade"} onClick={() => ui.setTool("blade")}>
           <svg {...iconProps} width={13} height={13}>
             <circle cx="6" cy="6" r="2.6" />
             <circle cx="6" cy="18" r="2.6" />
@@ -525,7 +525,7 @@ export function Timeline() {
             onChange={(e) =>
               ui.setZoom(Math.exp(Math.log(0.1) + (Number(e.target.value) / 100) * (Math.log(20) - Math.log(0.1))))
             }
-            title="Zoom"
+            title={t("tl.zoom")}
             className="h-1 w-28 min-w-10 shrink cursor-pointer appearance-none rounded bg-neutral-700 accent-neutral-200"
           />
           <svg {...iconProps} width={11} height={11} className="text-neutral-500">
@@ -544,14 +544,14 @@ export function Timeline() {
         {/* ── Track header column ── */}
         <div ref={headerColRef} className="sticky left-0 z-50 shrink-0 border-r border-neutral-800 bg-neutral-900" style={{ width: HEADER_W }}>
           <div className="sticky top-0 z-30 border-b border-neutral-800 bg-neutral-900" style={{ height: RULER_H }} />
-          {tracks.map((t, i) => {
-            const isVideo = t.type === "video";
+          {tracks.map((track, i) => {
+            const isVideo = track.type === "video";
             const label = isVideo ? `V${videoCounter[i]}` : `A${audioCounter[i]}`;
             return (
               <div
-                key={t.id}
+                key={track.id}
                 style={{ height: TRACK_H }}
-                className={`relative flex flex-col items-center justify-center gap-0.5 border-t border-neutral-800/60 px-1 pl-2 select-none ${
+                className={`relative flex flex-col items-center justify-center gap-0.5 border-track border-neutral-800/60 px-1 pl-2 select-none ${
                   trackDrag && trackDrag.from !== i && trackDrag.over === i ? "bg-emerald-500/15 ring-1 ring-inset ring-emerald-500/50" : ""
                 }`}
               >
@@ -561,7 +561,7 @@ export function Timeline() {
                 />
                 <div className="flex items-center gap-1">
                   <span
-                    title="Drag to reorder track"
+                    title={t("tl.reorderTrack")}
                     onPointerDown={(e) => {
                       e.preventDefault();
                       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -587,38 +587,38 @@ export function Timeline() {
                   {isVideo ? (
                     <>
                       <TrackBtn
-                        active={t.hidden}
-                        title={t.hidden ? "Show" : "Hide"}
-                        onClick={() => setTrackProps(i, { hidden: !t.hidden })}
+                        active={track.hidden}
+                        title={track.hidden ? "Show" : "Hide"}
+                        onClick={() => setTrackProps(i, { hidden: !track.hidden })}
                       >
-                        {t.hidden ? <IconEyeOff /> : <IconEye />}
+                        {track.hidden ? <IconEyeOff /> : <IconEye />}
                       </TrackBtn>
                       <TrackBtn
-                        active={t.locked}
-                        title={t.locked ? "Unlock" : "Lock"}
-                        onClick={() => setTrackProps(i, { locked: !t.locked })}
+                        active={track.locked}
+                        title={track.locked ? "Unlock" : "Lock"}
+                        onClick={() => setTrackProps(i, { locked: !track.locked })}
                       >
-                        {t.locked ? <IconLock /> : <IconUnlock />}
+                        {track.locked ? <IconLock /> : <IconUnlock />}
                       </TrackBtn>
                     </>
                   ) : (
                     <>
                       <TrackBtn
-                        active={t.muted}
-                        title={t.muted ? "Unmute" : "Mute"}
-                        onClick={() => setTrackProps(i, { muted: !t.muted })}
+                        active={track.muted}
+                        title={track.muted ? "Unmute" : "Mute"}
+                        onClick={() => setTrackProps(i, { muted: !track.muted })}
                       >
                         M
                       </TrackBtn>
-                      <TrackBtn active={false} title="Solo" onClick={() => soloTrack(i)}>
+                      <TrackBtn active={false} title={t("tl.solo")} onClick={() => soloTrack(i)}>
                         S
                       </TrackBtn>
                       <TrackBtn
-                        active={t.locked}
-                        title={t.locked ? "Unlock" : "Lock"}
-                        onClick={() => setTrackProps(i, { locked: !t.locked })}
+                        active={track.locked}
+                        title={track.locked ? "Unlock" : "Lock"}
+                        onClick={() => setTrackProps(i, { locked: !track.locked })}
                       >
-                        {t.locked ? <IconLock /> : <IconUnlock />}
+                        {track.locked ? <IconLock /> : <IconUnlock />}
                       </TrackBtn>
                     </>
                   )}
@@ -895,7 +895,7 @@ export function Timeline() {
           {contextMenu.clipId ? (
             <>
               <CtxItem
-                label="Copy"
+                label={t("lb.copy")}
                 onAction={() => {
                   if (!selected.has(contextMenu.clipId!)) ui.select([contextMenu.clipId!]);
                   copyClips();
@@ -903,7 +903,7 @@ export function Timeline() {
                 }}
               />
               <CtxItem
-                label="Cut"
+                label={t("lb.cut")}
                 onAction={() => {
                   if (!selected.has(contextMenu.clipId!)) ui.select([contextMenu.clipId!]);
                   cutClips();
@@ -911,7 +911,7 @@ export function Timeline() {
                 }}
               />
               <CtxItem
-                label="Duplicate"
+                label={t("lb.duplicate")}
                 onAction={() => {
                   if (!selected.has(contextMenu.clipId!)) ui.select([contextMenu.clipId!]);
                   duplicateSelected();
@@ -919,7 +919,7 @@ export function Timeline() {
                 }}
               />
               <CtxItem
-                label="Delete"
+                label={t("lb.delete")}
                 onAction={() => {
                   if (!selected.has(contextMenu.clipId!)) ui.select([contextMenu.clipId!]);
                   deleteSelected();
@@ -928,7 +928,7 @@ export function Timeline() {
               />
               <div className="my-1 border-t border-neutral-800" />
               <CtxItem
-                label="Select forward (from playhead)"
+                label={t("lb.selectForward")}
                 onAction={() => {
                   const ids = tracks.flatMap((t) => t.clips.filter((cl) => cl.startFrame + cl.durationFrames > playhead).map((cl) => cl.id));
                   if (ids.length) ui.select(ids);
@@ -936,7 +936,7 @@ export function Timeline() {
                 }}
               />
               <CtxItem
-                label="Split at playhead"
+                label={t("lb.splitAtPlayhead")}
                 onAction={() => {
                   const clip = findClip(contextMenu.clipId!);
                   if (clip && playhead > clip.startFrame && playhead < clip.startFrame + clip.durationFrames) {
@@ -946,7 +946,7 @@ export function Timeline() {
                 }}
               />
               <CtxItem
-                label="Add cross-fade"
+                label={t("lb.addCrossfade")}
                 onAction={() => {
                   sendCommand("add_transition", { clipId: contextMenu.clipId!, type: "cross", durationFrames: 15 });
                   closeCtx();
@@ -955,9 +955,9 @@ export function Timeline() {
             </>
           ) : (
             <>
-              <CtxItem label="Paste" onAction={() => { pasteClips(); closeCtx(); }} />
+              <CtxItem label={t("lb.paste")} onAction={() => { pasteClips(); closeCtx(); }} />
               <CtxItem
-                label="Select forward (from playhead)"
+                label={t("lb.selectForward")}
                 onAction={() => {
                   const ids = tracks.flatMap((t) => t.clips.filter((cl) => cl.startFrame + cl.durationFrames > playhead).map((cl) => cl.id));
                   if (ids.length) ui.select(ids);

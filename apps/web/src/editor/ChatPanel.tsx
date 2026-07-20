@@ -228,7 +228,7 @@ export function ChatPanel() {
       {/* right-edge resize handle */}
       <div
         onPointerDown={startResize}
-        title="Drag to resize the assistant panel"
+        title={t("chat.resize")}
         className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize transition-colors hover:bg-sky-500/50"
       />
       {dragOver && (
@@ -248,7 +248,7 @@ export function ChatPanel() {
             <select
               value={activeChatId}
               onChange={(e) => void selectChat(e.target.value)}
-              title="Conversation history"
+              title={t("chat.history")}
               className="w-24 min-w-0 shrink truncate rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-[10px] text-neutral-300 outline-none"
             >
               {chatList.map((c) => (
@@ -264,7 +264,7 @@ export function ChatPanel() {
             className={`shrink-0 rounded px-1.5 py-0.5 text-[12px] hover:bg-neutral-800 hover:text-neutral-200 ${
               showPrompts ? "bg-neutral-800 text-neutral-200" : "text-neutral-400"
             }`}
-            title="Prompt pronti"
+            title={t("chat.readyPrompts")}
           >
             ✨
           </button>
@@ -275,7 +275,7 @@ export function ChatPanel() {
                 if (confirm("Delete this conversation? It will be removed from history.")) void deleteChat(activeChatId);
               }}
               className="shrink-0 rounded px-1.5 py-0.5 text-[12px] text-neutral-500 hover:bg-neutral-800 hover:text-red-400"
-              title="Elimina questa conversazione"
+              title={t("chat.deleteConv")}
             >
               🗑
             </button>
@@ -285,7 +285,7 @@ export function ChatPanel() {
               type="button"
               onClick={() => void clearChat()}
               className="shrink-0 rounded px-1.5 py-0.5 text-[12px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-              title="Svuota i messaggi di questa conversazione"
+              title={t("chat.clearMessages")}
             >
               🧹
             </button>
@@ -294,7 +294,7 @@ export function ChatPanel() {
             type="button"
             onClick={() => void newChat()}
             className="shrink-0 rounded px-1.5 py-0.5 text-[12px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-            title="Nuova conversazione"
+            title={t("chat.newConv")}
           >
             ＋
           </button>
@@ -328,7 +328,7 @@ export function ChatPanel() {
         {chat.length === 0 && (
           <div className="space-y-2 text-xs leading-relaxed text-neutral-500">
             <p className="text-neutral-300">{t("chat.empty")}</p>
-            <p>e.g. "zoom in on the water on the first clip", "generate a 5s timelapse", "add Italian subtitles".</p>
+            <p>{t("chat.examples")}</p>
             <p>{t("chat.emptyHint")}</p>
           </div>
         )}
