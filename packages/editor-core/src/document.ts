@@ -752,7 +752,11 @@ export class EditorDocument {
 
   // ── media library ──
   addAsset(asset: MediaAsset): void {
-    this.project.media.push(asset);
+    // Every consumer reads `generationStatus.kind` unguarded, and callers that build the literal
+    // with an `as MediaAsset` cast can omit it (auto_clips' exported clips did) — which crashed the
+    // library render with "Cannot read properties of undefined". Normalize here so a malformed
+    // caller can't poison the document.
+    this.project.media.push(asset.generationStatus ? asset : { ...asset, generationStatus: { kind: "none" } });
   }
 
   removeAssets(ids: Set<string>): { removedClipIds: string[] } {

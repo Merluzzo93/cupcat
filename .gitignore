@@ -39,3 +39,6 @@ FASE28-PIANO.md
 STRATEGIA-2026.md
 *-this-session-is-being-continued-*.txt
 .tokeignore
+
+# Leftover temp files from an interrupted `bun build --compile`
+*.bun-build

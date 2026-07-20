@@ -70,6 +70,7 @@ export interface EditorState {
   claudeCodeNeeded: boolean; // the login is waiting for the code the user pastes from the browser
   update: { latest: string; downloadUrl: string | null; releaseUrl: string | null; notes: string | null } | null; // newer GitHub release
   updateDismissed: boolean;
+  toolProgress: { tool: string; text: string } | null; // live phase of a long-running tool (auto_clips…)
   // in-app AI assistant
   chat: ChatTurn[];
   chatList: { id: string; title: string; ts: number }[]; // conversation history (this project)
@@ -112,6 +113,7 @@ let state: EditorState = {
   claudeCodeNeeded: false,
   update: null,
   updateDismissed: false,
+  toolProgress: null,
   setupBusy: false,
   chat: [],
   chatList: [],
@@ -250,6 +252,8 @@ export function connectBridge(): void {
         // browser, we open it here too and reveal the code box (the login now waits for the code).
         setState({ claudeLoginUrl: msg.url, claudeLoginBusy: false, claudeCodeNeeded: true });
         try { window.open(msg.url, "_blank", "noopener"); } catch {}
+      } else if (msg.type === "tool-progress" && typeof msg.text === "string") {
+        setState({ toolProgress: { tool: String(msg.tool ?? ""), text: msg.text } });
       } else if (msg.type === "claude-login-progress" && typeof msg.text === "string") {
         setState({ claudeLoginProgress: msg.text });
       } else if (msg.type === "claude-login-error" && typeof msg.text === "string") {
@@ -397,6 +401,38 @@ export async function importFiles(files: FileList | File[], folderId?: string): 
   }
 }
 
+/** Open the native FILE picker and return the chosen absolute path, or null. Same Tauri-then-bridge
+ * strategy as pickFolder. `exts` restricts the visible files (e.g. ["png","jpg"]). */
+export async function pickFile(title: string, exts: string[] = []): Promise<string | null> {
+  const w = window as unknown as Record<string, unknown>;
+  if ("__TAURI_INTERNALS__" in w || "__TAURI__" in w) {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const sel = await open({
+        title,
+        multiple: false,
+        directory: false,
+        ...(exts.length ? { filters: [{ name: "Images", extensions: exts }] } : {}),
+      });
+      return typeof sel === "string" ? sel : null;
+    } catch {
+      /* fall through to the bridge dialog */
+    }
+  }
+  try {
+    const filter = exts.length ? `Images (${exts.map((e) => `*.${e}`).join(";")})|${exts.map((e) => `*.${e}`).join(";")}|All files (*.*)|*.*` : "All files (*.*)|*.*";
+    const r = await fetch(`${BRIDGE_HTTP}/pick-file`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title, filter }),
+    });
+    const j = await r.json();
+    return typeof j.path === "string" ? j.path : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Open the native folder picker and return the chosen absolute path, or null. In the packaged
  * desktop app this uses the Tauri dialog (parented to the window, reliable); in the dev browser it
  * falls back to a bridge-spawned native dialog. */
@@ -494,6 +530,11 @@ export async function checkForUpdate(): Promise<void> {
 /** Dismiss the update banner for this session. */
 export function dismissUpdate(): void {
   setState({ updateDismissed: true });
+}
+
+/** Reset the long-tool progress line (call when starting or finishing a run). */
+export function clearToolProgress(): void {
+  setState({ toolProgress: null });
 }
 
 /** Switch to (or create) a project. The new project arrives via the WS "state" broadcast; the

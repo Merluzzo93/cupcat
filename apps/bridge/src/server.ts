@@ -14,6 +14,7 @@ import { mediaPathFor, saveProject } from "./media";
 import { killTagged, openInBrowser } from "./proc";
 import { claudeInstalled, installClaudeCode, startClaudeLogin, submitClaudeCode } from "./claude-code";
 import { checkForUpdate } from "./update";
+import { setProgressSink } from "./progress";
 import { createProject, deleteProject, listProjects, switchProject } from "./projects";
 
 interface Sendable {
@@ -122,6 +123,10 @@ export function startServer(ctx: BridgeContext) {
     }
   };
 
+  // Relay long-tool phase text (auto_clips: transcribing → curating → exporting) to every client,
+  // so a multi-minute run shows what it's doing instead of looking frozen.
+  setProgressSink((p) => broadcastRaw({ type: "tool-progress", tool: p.tool, text: p.text }));
+
   const broadcastStatus = async () => {
     const claude = await getClaudeStatus();
     const msg = JSON.stringify({
@@ -189,6 +194,36 @@ export function startServer(ctx: BridgeContext) {
           return Response.json({ projects }, { headers: cors });
         }
         return new Response("Method Not Allowed", { status: 405 });
+      }
+
+      // Native FILE picker (watermark image, …): an absolute path typed by hand is a developer's
+      // interface, not a user's. -STA is required for the WinForms dialog to run from a child process.
+      if (path === "/pick-file" && req.method === "POST") {
+        if (!originAllowed(req)) return new Response("Forbidden origin", { status: 403 });
+        let body: { title?: string; filter?: string } = {};
+        try {
+          body = (await req.json()) as { title?: string; filter?: string };
+        } catch {
+          /* defaults below */
+        }
+        const title = (body.title ?? "Select a file").replace(/'/g, "''");
+        const filter = (body.filter ?? "All files (*.*)|*.*").replace(/'/g, "''");
+        const ps = [
+          "$ErrorActionPreference='SilentlyContinue'",
+          "Add-Type -AssemblyName System.Windows.Forms",
+          "$d = New-Object System.Windows.Forms.OpenFileDialog",
+          `$d.Title = '${title}'`,
+          `$d.Filter = '${filter}'`,
+          "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.FileName) }",
+        ].join("; ");
+        try {
+          const b64 = Buffer.from(ps, "utf16le").toString("base64");
+          const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-STA", "-EncodedCommand", b64], { stdout: "pipe", stderr: "ignore" });
+          const chosen = (await new Response(proc.stdout).text()).trim();
+          return Response.json({ path: chosen || null }, { headers: cors });
+        } catch {
+          return Response.json({ path: null }, { headers: cors });
+        }
       }
 
       // Native folder picker: spawn a Windows FolderBrowserDialog and return the chosen path.

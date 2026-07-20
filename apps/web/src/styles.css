@@ -134,3 +134,9 @@
     @apply text-foreground
   }
 }
+/* Indeterminate progress bar (AI Clips): the pipeline can't report a real percentage, so the bar
+   sweeps instead of faking one. */
+@keyframes cupcatSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}

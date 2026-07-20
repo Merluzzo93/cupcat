@@ -26,6 +26,7 @@ import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { BRIDGE_PORT, exportsDir, FFMPEG_BIN, mediaDir, projectRoot } from "./config";
 import { killTagged, run } from "./proc";
+import { emitProgress } from "./progress";
 import { type ExportFormat, type ExportQuality, ensureCompoundBake, exportTimeline, renderFrameAndScopes, renderFrameToFile, renderFrames, renderTimelineView, saveRangeToFile } from "./export";
 import { autoClips } from "./clips";
 import { autoRoughCut } from "./roughcut";
@@ -1617,6 +1618,9 @@ async function autoClipsTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const beepWords = Array.isArray(args.beepWords) ? (args.beepWords as unknown[]).map(String).filter(Boolean) : undefined;
   try {
     const res = await autoClips({
+      // Surface the pipeline's phases to the UI — a long video spends minutes in transcribe/curate
+      // and the dialog looked hung without this.
+      onProgress: (text) => emitProgress("auto_clips", text),
       srcPath: a.url,
       durationSeconds: a.durationSeconds ?? 0,
       count,
@@ -1649,6 +1653,7 @@ async function autoClipsTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
         sourceHeight: probe.height,
         sourceFPS: probe.fps,
         hasAudio: probe.hasAudio,
+        generationStatus: { kind: "none" },
       } as MediaAsset);
       void ensureThumbnail(c.file).catch(() => {});
       void ensureAudioProxy(c.file).catch(() => {});

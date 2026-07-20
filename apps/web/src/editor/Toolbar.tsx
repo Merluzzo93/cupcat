@@ -13,7 +13,9 @@ import {
   mcpCall,
   mediaUrl,
   openProject,
+  pickFile,
   pickFolder,
+  clearToolProgress,
   type ProjectEntry,
   recheckConnections,
   sendCommand,
@@ -364,7 +366,9 @@ export function Toolbar() {
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    // z-[100]: the timeline's sticky header column is z-50 and sits LATER in the DOM, so an equal
+    // z-index let it paint over every dialog (the "no tracks" strip cutting across this one).
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-[460px] max-w-[90vw] rounded-xl border border-neutral-700 bg-neutral-900 p-4 text-neutral-200 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -664,7 +668,7 @@ const CAPTION_STYLES = ["karaoke", "clean", "boxed", "minimal"];
  * vertical short (title + captions burned) exported to disk AND added to the library, presented as
  * rich result cards with virality score. */
 function AiClipsDialog({ onClose }: { onClose: () => void }) {
-  const { project } = useEditor();
+  const { project, toolProgress } = useEditor();
   const videos = (project?.media ?? []).filter((m) => m.type === "video");
   const [media, setMedia] = useState(videos[0]?.id ?? "");
   const [count, setCount] = useState(3);
@@ -682,6 +686,18 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
   const [folder, setFolder] = useState("");
   const [error, setError] = useState<string | null>(null);
   const inputCls = "w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs outline-none focus:border-neutral-500";
+
+  // A run takes minutes on a long video. The bridge streams the current phase, and this clock ticks
+  // alongside it so the dialog visibly works instead of looking hung between phases.
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt === null) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  const elapsedS = startedAt ? Math.max(0, Math.round((nowMs - startedAt) / 1000)) : 0;
+  const elapsed = `${Math.floor(elapsedS / 60)}:${String(elapsedS % 60).padStart(2, "0")}`;
 
   // ── brand kit presets ────────────────────────────────────────────────────────
   const [kits, setKits] = useState<BrandKit[]>(() => loadBrandKits());
@@ -734,6 +750,9 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     setClips(null);
+    clearToolProgress();
+    setStartedAt(Date.now());
+    setNowMs(Date.now());
     const beepWords = beep
       .split(",")
       .map((w) => w.trim())
@@ -753,6 +772,8 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
       ...(watermark.trim() && kitOpacity !== undefined ? { watermarkOpacity: kitOpacity } : {}),
     });
     setBusy(false);
+    setStartedAt(null);
+    clearToolProgress();
     if (out.isError) {
       setError(out.text || "Clip generation failed.");
       return;
@@ -804,9 +825,9 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
                 onClick={deleteKit}
                 disabled={busy || !kitName}
                 title="Delete the selected preset"
-                className="shrink-0 rounded border border-neutral-700 px-2 py-1.5 text-neutral-500 hover:bg-neutral-800 hover:text-red-400 disabled:opacity-40"
+                className="shrink-0 rounded border border-neutral-700 px-2.5 py-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-red-400 disabled:opacity-40"
               >
-                🗑
+                Delete
               </button>
             </div>
             <label className="flex flex-col gap-1">
@@ -822,15 +843,15 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
             </label>
             <div className="grid grid-cols-3 gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">Clips</span>
+                <span className="text-neutral-400">How many clips</span>
                 <input type="number" min={1} max={10} value={count} onChange={(e) => setCount(Number(e.target.value) || 3)} className={inputCls} disabled={busy} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">Min (s)</span>
+                <span className="text-neutral-400">Shortest (sec)</span>
                 <input type="number" min={3} value={minS} onChange={(e) => setMinS(Number(e.target.value) || 15)} className={inputCls} disabled={busy} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">Max (s)</span>
+                <span className="text-neutral-400">Longest (sec)</span>
                 <input type="number" min={5} value={maxS} onChange={(e) => setMaxS(Number(e.target.value) || 60)} className={inputCls} disabled={busy} />
               </label>
             </div>
@@ -838,8 +859,8 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               <label className="flex flex-col gap-1">
                 <span className="text-neutral-400">Format</span>
                 <select value={aspect} onChange={(e) => setAspect(e.target.value as "9:16" | "original")} className={inputCls} disabled={busy}>
-                  <option value="9:16">9:16 vertical (Shorts/Reels/TikTok)</option>
-                  <option value="original">Original aspect</option>
+                  <option value="9:16">Vertical 9:16 — Shorts & Reels</option>
+                  <option value="original">Keep original shape</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1">
@@ -863,18 +884,67 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               </label>
             </div>
             <label className="flex flex-col gap-1">
-              <span className="text-neutral-400">Beep words (optional, comma-separated) — censored with a beep</span>
-              <input value={beep} onChange={(e) => setBeep(e.target.value)} className={inputCls} disabled={busy} placeholder="e.g. brandname, competitor" />
+              <span className="text-neutral-400">What should the clips be about? (optional)</span>
+              <input value={prompt} onChange={(e) => setPrompt(e.target.value)} className={inputCls} disabled={busy} placeholder="Leave empty to find the most engaging moments" />
+              <span className="text-[10px] text-neutral-500">For example: “only the parts about pricing”.</span>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-neutral-400">Guidance (optional) — e.g. "only the moments about pricing"</span>
-              <input value={prompt} onChange={(e) => setPrompt(e.target.value)} className={inputCls} disabled={busy} placeholder="Leave empty for the most viral moments overall" />
+              <span className="text-neutral-400">Words to censor (optional)</span>
+              <input value={beep} onChange={(e) => setBeep(e.target.value)} className={inputCls} disabled={busy} placeholder="Separate with commas — e.g. brandname, competitor" />
+              <span className="text-[10px] text-neutral-500">Each one is covered with a beep.</span>
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-neutral-400">Watermark PNG (optional) — absolute path</span>
-              <input value={watermark} onChange={(e) => setWatermark(e.target.value)} className={inputCls} disabled={busy} placeholder="D:\brand\logo.png" />
-            </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-neutral-400">Logo (optional)</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void pickFile("Choose a logo image", ["png", "jpg", "jpeg", "webp"]).then((p) => p && setWatermark(p))}
+                  disabled={busy}
+                  className="shrink-0 rounded border border-neutral-700 px-2.5 py-1.5 text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
+                >
+                  Choose image…
+                </button>
+                {watermark ? (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-neutral-300" title={watermark}>
+                      {watermark.split(/[\\/]/).pop()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setWatermark("")}
+                      disabled={busy}
+                      title="Remove the logo"
+                      className="shrink-0 rounded px-1.5 py-1 text-neutral-500 hover:bg-neutral-800 hover:text-red-400 disabled:opacity-40"
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <span className="flex-1 text-neutral-600">No logo — clips stay clean</span>
+                )}
+              </div>
+              {watermark && <span className="text-[10px] text-neutral-500">Placed top-right on every clip.</span>}
+            </div>
           </>
+        )}
+        {busy && (
+          // Live progress: the bridge streams the real phase (transcribing → curating → exporting)
+          // and the clock keeps ticking between phases, so a multi-minute run never looks frozen.
+          <div className="flex flex-col gap-2 rounded-lg border border-violet-900/60 bg-violet-950/20 p-3">
+            <div className="flex items-center gap-2">
+              <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
+              <span className="min-w-0 flex-1 truncate font-medium text-violet-100">{toolProgress?.text ?? "Starting…"}</span>
+              <span className="shrink-0 font-mono text-[11px] text-violet-300/80">{elapsed}</span>
+            </div>
+            <div className="h-1 overflow-hidden rounded-full bg-violet-950">
+              {/* Indeterminate: the pipeline can't report a real percentage, so don't fake one. */}
+              <div className="h-full w-1/3 animate-[cupcatSlide_1.6s_ease-in-out_infinite] rounded-full bg-violet-500/80" />
+            </div>
+            <span className="text-[10px] text-violet-300/70">
+              Transcribing the video, then picking the best moments, then exporting each clip. Long videos take a few minutes — the
+              transcript is cached, so running this again on the same video is much faster.
+            </span>
+          </div>
         )}
         {error && <div className="whitespace-pre-wrap rounded border border-red-900 bg-red-950/40 p-2 text-red-300">{error}</div>}
         {clips && clips.length > 0 && (
@@ -908,7 +978,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
         {clips && clips.length === 0 && folder && <div className="whitespace-pre-wrap rounded border border-emerald-900 bg-emerald-950/30 p-2 text-emerald-200">{folder}</div>}
         <div className="flex items-center justify-between">
           <span className="text-neutral-500">
-            {busy ? "Working — transcribe → curate → export (≈1 min per clip)…" : clips ? "" : "Clips land in exports/ and in the library."}
+            {busy ? "You can keep working — this runs in the background." : clips ? "" : "Finished clips appear in your library, ready to use."}
           </span>
           {clips ? (
             <button onClick={() => setClips(null)} className="rounded border border-neutral-700 px-4 py-1.5 font-medium text-neutral-200 hover:bg-neutral-800">
