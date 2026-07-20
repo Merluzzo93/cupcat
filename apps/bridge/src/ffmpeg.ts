@@ -806,23 +806,26 @@ export interface VideoAnalysis {
 
 /** Visual defect + structure detection, all ffmpeg-native (no ML): black frames, frozen picture,
  * and scene changes. Two decode passes over the file; parses the filters' stderr logs. */
-export async function analyzeVideo(url: string, opts: { sceneThreshold?: number } = {}): Promise<VideoAnalysis> {
+export async function analyzeVideo(url: string, opts: { sceneThreshold?: number; scenesOnly?: boolean } = {}): Promise<VideoAnalysis> {
   const out: VideoAnalysis = { blackRanges: [], freezeRanges: [], sceneChanges: [] };
 
-  // Pass 1: black + freeze detection (both log to stderr).
-  const det = await run(FFMPEG_BIN, [
-    "-i", url, "-vf", "blackdetect=d=0.1:pic_th=0.98:pix_th=0.10,freezedetect=n=-60dB:d=1", "-an", "-f", "null", "-",
-  ]);
-  let freezeStart: number | null = null;
-  for (const line of det.stderr.split("\n")) {
-    const black = line.match(/black_start:\s*(-?[0-9.]+)\s+black_end:\s*(-?[0-9.]+)/);
-    if (black) out.blackRanges.push({ startSeconds: Math.max(0, Number.parseFloat(black[1]!)), endSeconds: Number.parseFloat(black[2]!) });
-    const fs = line.match(/freeze_start:\s*(-?[0-9.]+)/);
-    const fe = line.match(/freeze_end:\s*(-?[0-9.]+)/);
-    if (fs) freezeStart = Math.max(0, Number.parseFloat(fs[1]!));
-    else if (fe && freezeStart !== null) {
-      out.freezeRanges.push({ startSeconds: freezeStart, endSeconds: Number.parseFloat(fe[1]!) });
-      freezeStart = null;
+  // Pass 1: black + freeze detection (both log to stderr). Skipped when the caller only wants the
+  // shot structure (auto_clips) — it's a second full decode of the file for data nobody reads.
+  if (!opts.scenesOnly) {
+    const det = await run(FFMPEG_BIN, [
+      "-i", url, "-vf", "blackdetect=d=0.1:pic_th=0.98:pix_th=0.10,freezedetect=n=-60dB:d=1", "-an", "-f", "null", "-",
+    ]);
+    let freezeStart: number | null = null;
+    for (const line of det.stderr.split("\n")) {
+      const black = line.match(/black_start:\s*(-?[0-9.]+)\s+black_end:\s*(-?[0-9.]+)/);
+      if (black) out.blackRanges.push({ startSeconds: Math.max(0, Number.parseFloat(black[1]!)), endSeconds: Number.parseFloat(black[2]!) });
+      const fs = line.match(/freeze_start:\s*(-?[0-9.]+)/);
+      const fe = line.match(/freeze_end:\s*(-?[0-9.]+)/);
+      if (fs) freezeStart = Math.max(0, Number.parseFloat(fs[1]!));
+      else if (fe && freezeStart !== null) {
+        out.freezeRanges.push({ startSeconds: freezeStart, endSeconds: Number.parseFloat(fe[1]!) });
+        freezeStart = null;
+      }
     }
   }
 
@@ -837,9 +840,11 @@ export async function analyzeVideo(url: string, opts: { sceneThreshold?: number 
   return out;
 }
 
-/** Detect silent ranges via ffmpeg `silencedetect` (parses its stderr log). */
+/** Detect silent ranges via ffmpeg `silencedetect` (parses its stderr log).
+ * `-vn` matters: without it ffmpeg's automatic stream selection also decodes the whole video track
+ * for the null muxer — minutes of wasted CPU on a long file, for a measurement that reads only audio. */
 export async function audioSilences(url: string, noiseDb: number, minDur: number): Promise<SilenceRange[]> {
-  const { stderr } = await run(FFMPEG_BIN, ["-i", url, "-af", `silencedetect=noise=${noiseDb}dB:d=${minDur}`, "-f", "null", "-"]);
+  const { stderr } = await run(FFMPEG_BIN, ["-i", url, "-vn", "-af", `silencedetect=noise=${noiseDb}dB:d=${minDur}`, "-f", "null", "-"]);
   const ranges: SilenceRange[] = [];
   let start: number | null = null;
   for (const line of stderr.split("\n")) {

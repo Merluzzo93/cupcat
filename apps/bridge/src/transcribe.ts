@@ -4,7 +4,7 @@
 //                             ffmpeg first (whisper.cpp requires it), then parse its JSON.
 // Results are cached per source path so the timeline tools don't re-transcribe.
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { cpus } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { FFMPEG_BIN, mediaDir } from "./config";
@@ -82,10 +82,15 @@ const isHallucinatedPhrase = (text: string): boolean => {
  * default to when they have nothing real to transcribe. Cross-validating against real silence
  * detection (rather than trusting whisper's own confidence fields, which differ or are absent across
  * backends) is what makes "a clean tone yields zero lines" hold regardless of backend. */
-async function stripHallucinations(path: string, t: Transcript): Promise<Transcript> {
+async function stripHallucinations(
+  path: string,
+  t: Transcript,
+  pending?: Promise<{ startSeconds: number; endSeconds: number }[]>,
+): Promise<Transcript> {
   let silences: { startSeconds: number; endSeconds: number }[] = [];
   try {
-    silences = await audioSilences(path, -35, 0.4);
+    // Reuse the pass the caller already kicked off in parallel with whisper when there is one.
+    silences = await (pending ?? audioSilences(path, -35, 0.4));
   } catch {
     /* best-effort: fall through to phrase-only filtering below */
   }
@@ -190,6 +195,48 @@ export function detectRetakes(words: TWord[]): { start: number; end: number; tex
 // own ffmpeg-resample + whisper run, doubling CPU and racing on the same output files.
 const inFlight = new Map<string, Promise<Transcript | null>>();
 
+// ── Persistent transcript cache ──────────────────────────────────────────────
+// Transcribing a long file is minutes of CPU (resample + whisper + silence pass) and is
+// deterministic for the same (source bytes, backend/model, language) — yet the in-memory cache dies
+// with the process, so every bridge restart used to redo all of it. Persist the FINISHED transcript
+// (already hallucination-stripped) next to whisper's own output and reuse it when nothing changed.
+interface DiskCache {
+  key: string;
+  mtimeMs: number;
+  size: number;
+  transcript: Transcript;
+}
+
+const cacheFileFor = (path: string) => join(mediaDir, ".transcripts", `${basename(path, extname(path))}.cupcat.json`);
+
+/** Identity of everything that can change a transcript, besides the source bytes. */
+async function backendKey(language?: string): Promise<string> {
+  const model = WHISPER_KIND === "cpp" ? ((await resolveBestModel()) ?? "none") : WHISPER_MODEL;
+  return `${WHISPER_KIND}::${model}::${language ?? ""}`;
+}
+
+async function readDiskCache(path: string, language?: string): Promise<Transcript | null> {
+  try {
+    const src = await stat(path);
+    const c = (await Bun.file(cacheFileFor(path)).json()) as DiskCache;
+    if (c.key !== (await backendKey(language)) || c.mtimeMs !== src.mtimeMs || c.size !== src.size) return null;
+    return c.transcript?.segments ? c.transcript : null;
+  } catch {
+    return null; // absent, stale or unreadable — transcribe normally
+  }
+}
+
+async function writeDiskCache(path: string, language: string | undefined, transcript: Transcript): Promise<void> {
+  try {
+    const src = await stat(path);
+    const payload: DiskCache = { key: await backendKey(language), mtimeMs: src.mtimeMs, size: src.size, transcript };
+    await mkdir(join(mediaDir, ".transcripts"), { recursive: true });
+    await Bun.write(cacheFileFor(path), JSON.stringify(payload));
+  } catch {
+    /* best-effort: a missing cache only costs time on the next run */
+  }
+}
+
 export async function transcribe(path: string, language?: string): Promise<Transcript | null> {
   const key = `${WHISPER_KIND}::${path}::${language ?? ""}`;
   const cached = cache.get(key);
@@ -197,9 +244,20 @@ export async function transcribe(path: string, language?: string): Promise<Trans
   const running = inFlight.get(key);
   if (running) return running;
   const job = (async () => {
+    const fromDisk = await readDiskCache(path, language);
+    if (fromDisk) {
+      cache.set(key, fromDisk);
+      return fromDisk;
+    }
+    // Silence detection reads only the audio, not the transcript — start it alongside whisper
+    // instead of after it, so a long file doesn't pay for two serial passes over its audio.
+    const silences = audioSilences(path, -35, 0.4).catch(() => [] as { startSeconds: number; endSeconds: number }[]);
     const raw = WHISPER_KIND === "cpp" ? await transcribeCpp(path, language) : await transcribeOpenAI(path, language);
-    const result = raw ? await stripHallucinations(path, raw) : raw;
-    if (result) cache.set(key, result);
+    const result = raw ? await stripHallucinations(path, raw, silences) : raw;
+    if (result) {
+      cache.set(key, result);
+      await writeDiskCache(path, language, result);
+    }
     return result;
   })();
   inFlight.set(key, job);

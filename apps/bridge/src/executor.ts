@@ -83,11 +83,36 @@ const MEDIA_EXTS = new Set([
   "png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff",
 ]);
 
+/** Undo earlier pollution: CupCat's feedback bundles contain a screenshot.png that used to be
+ * imported as media, creating a stray "feedback" folder in the library. Drop those assets — never
+ * one the user actually placed on the timeline — plus any folder left empty by the removal. */
+function pruneSystemImports(ctx: BridgeContext, rootFwd: string): void {
+  const prefix = `${rootFwd.replace(/\/+$/, "")}/feedback/`;
+  const used = new Set<string>();
+  for (const t of ctx.doc.project.timeline.tracks) for (const c of t.clips) if (c.mediaRef) used.add(c.mediaRef);
+  const junk = ctx.doc.project.media.filter((m) => (m.url ?? "").replace(/\\/g, "/").startsWith(prefix) && !used.has(m.id));
+  if (junk.length === 0) return;
+  const touched = new Set(junk.map((m) => m.folderId).filter((f): f is string => !!f));
+  ctx.doc.removeAssets(new Set(junk.map((m) => m.id)));
+  // Only drop a folder that just lost its last asset and holds no subfolders — a folder the user
+  // created on purpose (or one with real media) is never touched.
+  ctx.doc.project.folders = ctx.doc.project.folders.filter(
+    (f) =>
+      !(
+        touched.has(f.id) &&
+        !ctx.doc.project.media.some((m) => m.folderId === f.id) &&
+        !ctx.doc.project.folders.some((c) => c.parentFolderId === f.id)
+      ),
+  );
+  ctx.doc.notifyChanged();
+}
+
 /** Scan the open project's folder for loose media files and import any not already in the library. */
 export async function importFolderMedia(ctx: BridgeContext): Promise<void> {
   try {
     // Normalize a git-bash /d/foo path to D:/foo so Bun can open it on Windows.
     const root = projectRoot.replace(/^\/([a-zA-Z])\//, (_m, d: string) => `${d.toUpperCase()}:/`);
+    pruneSystemImports(ctx, root.replace(/\\/g, "/")); // clean projects polluted by the old scan
     const entries = (await readdir(root, { recursive: true, withFileTypes: true })) as Array<{
       name: string;
       parentPath?: string;
@@ -111,7 +136,10 @@ export async function importFolderMedia(ctx: BridgeContext): Promise<void> {
     for (const e of entries) {
       if (!e.isFile()) continue;
       const dir = (e.parentPath ?? e.path ?? root).replace(/\\/g, "/");
-      if (/\/(\.cupcat|exports)(\/|$)/.test(dir) || /\.scrubv?\d*\.mp4|\.dvsdr\d*\.mp4|\.audio\.(webm|m4a)|\.thumbv?\d*\.jpg/.test(e.name)) continue;
+      // Skip CupCat's own output/state dirs: exports, feedback bundles (they hold a screenshot.png
+      // that would otherwise be imported and create a stray "feedback" folder) and any dot-dir
+      // (.cupcat, media/.transcripts, …). Only real user media should reach the library.
+      if (/\/(\.[^/]+|exports|feedback)(\/|$)/.test(dir) || /\.scrubv?\d*\.mp4|\.dvsdr\d*\.mp4|\.audio\.(webm|m4a)|\.thumbv?\d*\.jpg/.test(e.name)) continue;
       const ext = e.name.split(".").pop()?.toLowerCase() ?? "";
       if (!MEDIA_EXTS.has(ext) || haveNames.has(e.name)) continue;
       haveNames.add(e.name);

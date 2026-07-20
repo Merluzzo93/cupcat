@@ -421,13 +421,22 @@ export async function autoClips(args: AutoClipsArgs): Promise<{ clips: AutoClipR
       throw new Error("Cannot determine this video's duration (probe failed) — visual clip curation needs it to sample frames.");
     }
     progress("Detecting scenes…");
-    const { sceneChanges } = await analyzeVideo(args.srcPath);
+    const { sceneChanges } = await analyzeVideo(args.srcPath, { scenesOnly: true }); // black/freeze unused here
     const times = sceneSampleTimes(sceneChanges, args.durationSeconds);
     progress(`Sampling ${times.length} frames…`);
+    // Each frame is an independent fast input-seek — extract them a few at a time instead of one by
+    // one. Bounded pool (not Promise.all over every scene) so a fast-cut file can't spawn dozens of
+    // ffmpeg processes at once. Same frames, same order.
+    const FRAME_POOL = 4;
     const frames: { t: number; data: string; mediaType: string }[] = [];
-    for (const t of times) {
-      const png = await frameToBase64(args.srcPath, t, 512);
-      if (png) frames.push({ t, ...(await frameForVision(png, frames.length)) });
+    for (let i = 0; i < times.length; i += FRAME_POOL) {
+      const batch = await Promise.all(
+        times.slice(i, i + FRAME_POOL).map(async (t, j) => {
+          const png = await frameToBase64(args.srcPath, t, 512);
+          return png ? { t, ...(await frameForVision(png, i + j)) } : null;
+        }),
+      );
+      for (const f of batch) if (f) frames.push(f);
     }
     if (frames.length === 0) throw new Error("Could not extract any frames from this video — the file may be unreadable.");
     progress("Asking Claude to pick the best visual moments…");
@@ -491,10 +500,14 @@ export async function autoClips(args: AutoClipsArgs): Promise<{ clips: AutoClipR
   }
   // Captions require words — forced off when there is no transcript (visual mode on mute footage).
   const captionsOn = args.captions && words.length > 0;
-  const results: AutoClipResult[] = [];
+  // Two phases: build every clip's filter graph + .ass first (cheap I/O), then render them
+  // CONCURRENTLY. Sequential exports left cores idle between clips; withTranscodeSlot still caps
+  // real parallelism at 2. Each ffmpeg invocation is unchanged, so the files are byte-for-byte what
+  // the sequential path produced.
+  const jobs: { p: ClipPick; out: string; ffArgs: string[] }[] = [];
   for (let i = 0; i < picks.length; i++) {
     const p = picks[i]!;
-    progress(`Exporting clip ${i + 1}/${picks.length}: ${p.title}`);
+    progress(`Preparing clip ${i + 1}/${picks.length}: ${p.title}`);
     const base = `clip-${String(i + 1).padStart(2, "0")}-${slug(p.title)}`;
     const out = join(folder, `${base}.mp4`);
     const vf: string[] = [];
@@ -568,19 +581,29 @@ export async function autoClips(args: AutoClipsArgs): Promise<{ clips: AutoClipR
       "+faststart",
       out,
     ];
-    const { code, stderr } = await withTranscodeSlot(() => run(FFMPEG_BIN, ffArgs));
-    if (code !== 0 || !(await Bun.file(out).exists())) {
-      throw new Error(`Export failed for "${p.title}" (${p.startSeconds}-${p.endSeconds}s): ${stderr.slice(-300)}`);
-    }
-    results.push({
-      file: out,
-      title: p.title,
-      hook: p.hook,
-      score: p.score,
-      startSeconds: p.startSeconds,
-      endSeconds: p.endSeconds,
-      reason: p.reason,
-    });
+    jobs.push({ p, out, ffArgs });
   }
+
+  let done = 0;
+  progress(`Exporting ${jobs.length} clip(s)…`);
+  const results: AutoClipResult[] = await Promise.all(
+    jobs.map(async ({ p, out, ffArgs }) => {
+      const { code, stderr } = await withTranscodeSlot(() => run(FFMPEG_BIN, ffArgs));
+      if (code !== 0 || !(await Bun.file(out).exists())) {
+        throw new Error(`Export failed for "${p.title}" (${p.startSeconds}-${p.endSeconds}s): ${stderr.slice(-300)}`);
+      }
+      done += 1;
+      progress(`Exported ${done}/${jobs.length}: ${p.title}`);
+      return {
+        file: out,
+        title: p.title,
+        hook: p.hook,
+        score: p.score,
+        startSeconds: p.startSeconds,
+        endSeconds: p.endSeconds,
+        reason: p.reason,
+      };
+    }),
+  );
   return { clips: results, folder, language: tr?.language ?? "visual" };
 }
