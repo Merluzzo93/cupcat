@@ -14,12 +14,16 @@ Claude edits your timeline. Everything runs on your machine. No credits, no wate
 [![Release](https://img.shields.io/badge/release-v1.7.5-e5484d.svg)](../../releases/latest)
 [![Local & free](https://img.shields.io/badge/AI-100%25%20local%20%C2%B7%20free-2ea043.svg)]()
 
-**🌐 Website & docs: [cupcat.meetaly.agency](https://cupcat.meetaly.agency)**
+### [⬇&nbsp; Download for Windows](../../releases/latest) &nbsp;·&nbsp; [🌐&nbsp; Website & docs](https://cupcat.meetaly.agency)
+
+<sub>Free · one installer · nothing else to install</sub>
 
 </div>
 
 <div align="center">
-  <img src="docs/screenshot.png" alt="CupCat editor" width="900" />
+  <img src="docs/demo.gif" alt="Claude cutting, captioning and reframing a timeline inside CupCat" width="860" />
+  <br />
+  <sub>Ask in plain language — Claude drives the real timeline, on your machine.</sub>
 </div>
 
 ---
@@ -151,7 +155,8 @@ bunx @tauri-apps/cli build      # → target/release/bundle/nsis/CupCat_<version
 
 ## Roadmap
 
-See [`ROADMAP.md`](ROADMAP.md) for the full development history through v1.7.0.
+See [`ROADMAP.md`](ROADMAP.md) for where CupCat is heading, and the
+[releases](../../releases) for what already shipped.
 
 ## License
 
