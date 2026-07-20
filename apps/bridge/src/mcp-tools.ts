@@ -579,6 +579,76 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "auto_chapters",
+    description:
+      "CHAPTERS FROM SPEECH: split a library video into chapters by topic and return a ready-to-paste YouTube chapter list, optionally dropping a timeline marker at each one. THE tool for 'add chapters', 'YouTube timestamps', 'break this into sections', 'what are the topics'. Uses the cached transcript, so on a video already transcribed (captions, clipping, filler removal) it is nearly instant and costs one short model call.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library video asset id (or exact name) with speech." },
+        addMarkers: { type: "boolean", description: "Also place a timeline marker at each chapter (default true)." },
+        language: { type: "string", description: "Force the transcript language (ISO code) instead of auto-detecting." },
+      },
+      ["media"],
+    ),
+  },
+  {
+    name: "stabilize_video",
+    description:
+      "STABILIZE SHAKY FOOTAGE: analyse the camera shake in a library video and render a smoothed copy. THE tool for 'this is shaky', 'stabilise this', 'handheld looks rough', 'make it smooth', 'gimbal look'. Two-pass, fully local, no quality trade beyond the small edge warp. Produces a NEW library video; the original is untouched. Roughly 0.7x realtime.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library video asset id (or exact name)." },
+        strength: { type: "integer", description: "1-10, how much smoothing (default 5). Raise for very shaky handheld, lower to keep intentional camera movement." },
+      },
+      ["media"],
+    ),
+  },
+  {
+    name: "enhance_audio",
+    description:
+      "CLEAN UP VOICE AUDIO: remove background hiss/room tone/air-conditioning, cut mains hum and rumble, and level the result to broadcast loudness (EBU R128). THE tool for 'the audio is noisy/hissy', 'clean the voice', 'too quiet', 'fix the sound', 'normalise the levels'. Local and free. The picture is copied untouched — only the audio is re-encoded. Produces a NEW library asset.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library asset id (or exact name) — video with audio, or an audio file." },
+        strength: { type: "integer", description: "1-10 denoise aggressiveness (default 5). High values can make a voice sound processed — prefer 4-6." },
+        removeHum: { type: "boolean", description: "Cut mains hum and low rumble below the voice (default true)." },
+        normalize: { type: "boolean", description: "Level to EBU R128 -16 LUFS (default true). Set false to keep the original dynamics." },
+      },
+      ["media"],
+    ),
+  },
+  {
+    name: "denoise_video",
+    description:
+      "REMOVE VIDEO GRAIN: reduce sensor noise in low-light footage. Use for 'grainy', 'noisy picture', 'shot in the dark', 'clean up the image'. Local, free, fast. Produces a NEW library video. Note this softens fine detail — keep the strength low unless the noise is heavy.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library video asset id (or exact name)." },
+        strength: { type: "integer", description: "1-10 (default 4). Above ~6 the picture starts to look plasticky." },
+      },
+      ["media"],
+    ),
+  },
+  {
+    name: "deflicker_video",
+    description:
+      "FIX PULSING BRIGHTNESS: even out frame-to-frame exposure flicker — artificial lighting beating against the shutter, or a time-lapse. Use for 'the image pulses/flickers', 'brightness jumps'. Local and free. Produces a NEW library video.",
+    inputSchema: obj({ media: { type: "string", description: "Library video asset id (or exact name)." } }, ["media"]),
+  },
+  {
+    name: "duck_music",
+    description:
+      "DUCK MUSIC UNDER A VOICE: render a copy of a music track that automatically drops in level whenever the voice speaks and comes back up in the gaps. THE tool for 'the music covers the voice', 'lower the music when I talk', 'add ducking', 'balance music and speech'. Local and free — this is the mix move every talking-head edit needs. Produces a NEW audio asset to use instead of the original music.",
+    inputSchema: obj(
+      {
+        music: { type: "string", description: "Library asset id (or exact name) of the MUSIC track." },
+        voice: { type: "string", description: "Library asset id (or exact name) carrying the VOICE (a video with speech works)." },
+        amount: { type: "integer", description: "1-10 how hard the music is pushed down (default 6)." },
+      },
+      ["music", "voice"],
+    ),
+  },
+  {
     name: "blur_faces",
     description:
       "PRIVACY / FACE BLUR: find every human face in a library video and render a copy with each one covered, following it as it moves. THE tool whenever the user wants faces blurred, hidden, censored, anonymised, pixelated, made unrecognisable, or asks to 'protect people's privacy' / 'hide bystanders' / 'GDPR' in footage. Faces are found by looking at sampled frames (works on profiles, background people and faces on screens), each face is tracked, and a face that leaves the shot stops being covered. Produces a NEW library video — the original is untouched. Cost scales with length: sample every 2-3s on long footage, every 0.5-1s when people move fast.",

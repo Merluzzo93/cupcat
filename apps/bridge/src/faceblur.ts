@@ -42,14 +42,19 @@ export interface DetectOptions {
   onProgress?: (text: string) => void;
 }
 
+// Several frames go into ONE request: detection was one API call per frame, which on a 36-minute
+// video meant thousands of round trips (~12 minutes of pure waiting). Asking for one result array
+// per image cuts the calls by BATCH and costs nothing in coverage — the same frames are still seen.
+const BATCH = 5;
+
 const SYSTEM = [
-  "You locate human faces in a video frame.",
-  "Reply with ONLY a JSON array, no prose, no code fence.",
-  'Each element: {"x":0.12,"y":0.08,"w":0.15,"h":0.22} — the face\'s bounding box as fractions of the frame width/height, origin at the TOP-LEFT.',
+  "You locate human faces in video frames.",
+  "You are given N images. Reply with ONLY a JSON array of N arrays — one per image, in the same order.",
+  'Each inner element: {"x":0.12,"y":0.08,"w":0.15,"h":0.22} — the face\'s bounding box as fractions of that image\'s width/height, origin at the TOP-LEFT.',
   "Box the head: forehead to chin, ear to ear. Exclude neck and shoulders.",
   "Include every human face: background people, faces on screens or posters, partial and profile faces.",
   "Do NOT include animal faces, statues, drawings or logos.",
-  "If there is no face at all, reply exactly: []",
+  "An image with no face gets an empty array. Example for 3 images: [[{...}],[],[{...},{...}]]",
 ].join("\n");
 
 /** Parse the model's reply into boxes, tolerating stray prose or a code fence. */
@@ -79,6 +84,34 @@ export function parseBoxes(raw: string): { x: number; y: number; w: number; h: n
     out.push({ x, y, w, h });
   }
   return out;
+}
+
+/**
+ * Parse the batched reply: an array of `expected` arrays, one per image. Degrades rather than
+ * fails — a short reply pads with empties, and a model that flattened everything into one array is
+ * treated as "all of it belongs to the first frame" only when a single frame was asked for.
+ */
+export function parseFrameBatch(raw: string, expected: number): { x: number; y: number; w: number; h: number }[][] {
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  const out: { x: number; y: number; w: number; h: number }[][] = [];
+  if (start >= 0 && end > start) {
+    try {
+      const arr = JSON.parse(raw.slice(start, end + 1)) as unknown;
+      if (Array.isArray(arr)) {
+        const nested = arr.some((e) => Array.isArray(e));
+        if (nested) {
+          for (const grp of arr) out.push(Array.isArray(grp) ? parseBoxes(JSON.stringify(grp)) : []);
+        } else if (expected === 1) {
+          out.push(parseBoxes(raw));
+        }
+      }
+    } catch {
+      /* fall through to the padding below */
+    }
+  }
+  while (out.length < expected) out.push([]);
+  return out.slice(0, expected);
 }
 
 /** Grow a box by `pad` on every side, clamped to the frame. */
@@ -161,24 +194,38 @@ export async function detectFaces(srcPath: string, opts: DetectOptions): Promise
   for (let t = start; t < end; t += every) times.push(Math.round(t * 100) / 100);
   if (times.length === 0) return [];
 
+  // Group the sampled times into batches, then run several batches at once: the work is API-bound,
+  // so the wall clock is (frames / BATCH / POOL) round trips rather than one per frame.
+  const groups: number[][] = [];
+  for (let i = 0; i < times.length; i += BATCH) groups.push(times.slice(i, i + BATCH));
+
   const frames: { t: number; boxes: { x: number; y: number; w: number; h: number }[] }[] = [];
-  const POOL = 3; // a few frames in flight: detection is API-bound, not CPU-bound
-  for (let i = 0; i < times.length; i += POOL) {
-    const batch = times.slice(i, i + POOL);
-    progress(`Looking for faces… ${Math.min(i + batch.length, times.length)}/${times.length}`);
+  const POOL = 6;
+  let seen = 0;
+  for (let g = 0; g < groups.length; g += POOL) {
+    const wave = groups.slice(g, g + POOL);
     const done = await Promise.all(
-      batch.map(async (t) => {
-        const img = await frameToBase64(srcPath, t, 640);
-        if (!img) return { t, boxes: [] };
+      wave.map(async (group) => {
+        const imgs = await Promise.all(group.map((t) => frameToBase64(srcPath, t, 640)));
+        const usable = group.map((t, i) => ({ t, img: imgs[i] })).filter((f): f is { t: number; img: string } => !!f.img);
+        if (usable.length === 0) return group.map((t) => ({ t, boxes: [] }));
         try {
-          const raw = await oneShotVision(SYSTEM, `Frame at t=${t.toFixed(2)}s.`, [{ data: img, mediaType: "image/jpeg" }], { maxTokens: 700 });
-          return { t, boxes: parseBoxes(raw).map((b) => padBox(b, pad)) };
+          const raw = await oneShotVision(
+            SYSTEM,
+            `${usable.length} frames, in order: ${usable.map((f) => `${f.t.toFixed(2)}s`).join(", ")}. Return ${usable.length} arrays.`,
+            usable.map((f) => ({ data: f.img, mediaType: "image/jpeg" })),
+            { maxTokens: 1600 },
+          );
+          const per = parseFrameBatch(raw, usable.length);
+          return usable.map((f, i) => ({ t: f.t, boxes: (per[i] ?? []).map((b) => padBox(b, pad)) }));
         } catch {
-          return { t, boxes: [] }; // one unreadable frame must not sink the whole pass
+          return group.map((t) => ({ t, boxes: [] })); // one bad batch must not sink the whole pass
         }
       }),
     );
-    frames.push(...done);
+    for (const d of done) frames.push(...d);
+    seen += wave.reduce((n, w) => n + w.length, 0);
+    progress(`Looking for faces… ${Math.min(seen, times.length)}/${times.length}`);
   }
   frames.sort((a, b) => a.t - b.t);
   return buildTracks(frames);

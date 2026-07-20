@@ -30,6 +30,8 @@ import { emitProgress } from "./progress";
 import { type ExportFormat, type ExportQuality, ensureCompoundBake, exportTimeline, renderFrameAndScopes, renderFrameToFile, renderFrames, renderTimelineView, saveRangeToFile } from "./export";
 import { autoClips } from "./clips";
 import { renderFaceBlur } from "./faceblur";
+import { deflickerVideo, denoiseVideo, duckMusic, enhanceAudio, stabilizeVideo } from "./enhance";
+import { chapterTimestamp, detectChapters } from "./chapters";
 import { autoRoughCut } from "./roughcut";
 import { reframeLocal } from "./reframe-local";
 import { applyTemplate, listTemplates, saveTemplate } from "./templates";
@@ -1604,6 +1606,100 @@ async function autoRoughCutTool(ctx: BridgeContext, args: Args): Promise<ToolOut
   }
 }
 
+/** Chapters from what's said: markers on the timeline + a description block ready to paste. */
+async function autoChaptersTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.media);
+  const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
+  if (!a) return fail(`Asset not found: ${ref ?? "(media is required — pass a library video's id or name)"}`);
+  if (a.type !== "video" || !a.url) return fail("auto_chapters needs a VIDEO asset from the library.");
+  try {
+    const { chapters, language } = await detectChapters(a.url, {
+      durationSeconds: a.durationSeconds ?? 0,
+      language: strOpt(args.language),
+      onProgress: (text) => emitProgress("auto_chapters", text),
+    });
+    const fps = ctx.doc.project.timeline.fps || 30;
+    let placed = 0;
+    if (args.addMarkers !== false) {
+      for (const c of chapters) {
+        const frame = Math.max(0, Math.round(c.startSeconds * fps));
+        const r = TIMELINE_COMMANDS.add_marker?.(ctx.doc, { frame, note: c.title }, "agent");
+        if (r) placed++;
+      }
+      if (placed) ctx.doc.notifyChanged();
+    }
+    const list = chapters.map((c) => `${chapterTimestamp(c.startSeconds)} ${c.title}`).join("\n");
+    return ok(
+      `${chapters.length} chapters (${language})${placed ? `, ${placed} markers placed on the timeline` : ""}:\n\n${list}`,
+    );
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Shared shape for the local repair tools: resolve a library asset, render a fixed copy, register
+ * it. They all leave the source untouched, so the user can always compare or fall back. */
+async function enhanceTool(
+  ctx: BridgeContext,
+  args: Args,
+  label: string,
+  render: (src: string, progress: (t: string) => void) => Promise<{ file: string; note: string }>,
+): Promise<ToolOut> {
+  const ref = strOpt(args.media);
+  const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
+  if (!a) return fail(`Asset not found: ${ref ?? "(media is required — pass a library asset's id or name)"}`);
+  if (!a.url) return fail("That library asset has no file on disk.");
+  try {
+    const res = await render(a.url, (text) => emitProgress(label, text));
+    const id = await registerRenderedAsset(ctx, res.file, `${a.name} (${label})`);
+    return ok(`Rendered "${a.name} (${label})" — ${res.note} — and added it to the library.\nFile: ${res.file}\nAsset: ${id}`);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Ducking needs two sources (music + voice), so it doesn't fit enhanceTool's single-asset shape. */
+async function duckMusicTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const find = (ref?: string) => (ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null);
+  const music = find(strOpt(args.music));
+  const voice = find(strOpt(args.voice));
+  if (!music?.url) return fail("Pass the MUSIC asset (id or exact name) in `music`.");
+  if (!voice?.url) return fail("Pass the asset carrying the VOICE (id or exact name) in `voice`.");
+  try {
+    const res = await duckMusic(music.url, voice.url, {
+      amount: numOpt(args.amount),
+      onProgress: (text) => emitProgress("duck_music", text),
+    });
+    const id = await registerRenderedAsset(ctx, res.file, `${music.name} (ducked)`);
+    return ok(`Rendered "${music.name} (ducked)" — ${res.note}. Use it in place of the original music.\nFile: ${res.file}\nAsset: ${id}`);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Probe a freshly rendered file and put it in the library with thumbnail + audio proxy warmed. */
+async function registerRenderedAsset(ctx: BridgeContext, file: string, name: string): Promise<string> {
+  const probe = await probeMedia(file);
+  const id = newId("asset");
+  const isVideo = (probe.width ?? 0) > 0;
+  ctx.doc.addAsset({
+    id,
+    type: isVideo ? "video" : "audio",
+    name,
+    url: file,
+    durationSeconds: probe.durationSeconds,
+    sourceWidth: probe.width,
+    sourceHeight: probe.height,
+    sourceFPS: probe.fps,
+    hasAudio: probe.hasAudio,
+    generationStatus: { kind: "none" },
+  } as MediaAsset);
+  void ensureThumbnail(file).catch(() => {});
+  void ensureAudioProxy(file).catch(() => {});
+  ctx.doc.notifyChanged();
+  return id;
+}
+
 /** Cover every face in a library video and register the anonymised copy as a new asset. */
 async function blurFacesTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const ref = strOpt(args.media);
@@ -2303,6 +2399,25 @@ export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Arg
         return await analyzeFootageTool(ctx.doc, args);
       case "capture_frame":
         return await captureFrame(ctx, args);
+      case "auto_chapters":
+        return await autoChaptersTool(ctx, args);
+      case "stabilize_video":
+        return await enhanceTool(ctx, args, "stabilized", (src, prog) => stabilizeVideo(src, { strength: numOpt(args.strength), onProgress: prog }));
+      case "denoise_video":
+        return await enhanceTool(ctx, args, "denoised", (src, prog) => denoiseVideo(src, { strength: numOpt(args.strength), onProgress: prog }));
+      case "deflicker_video":
+        return await enhanceTool(ctx, args, "deflickered", (src, prog) => deflickerVideo(src, { onProgress: prog }));
+      case "enhance_audio":
+        return await enhanceTool(ctx, args, "clean audio", (src, prog) =>
+          enhanceAudio(src, {
+            strength: numOpt(args.strength),
+            removeHum: args.removeHum !== false,
+            normalize: args.normalize !== false,
+            onProgress: prog,
+          }),
+        );
+      case "duck_music":
+        return await duckMusicTool(ctx, args);
       case "blur_faces":
         return await blurFacesTool(ctx, args);
       case "auto_clips":

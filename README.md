@@ -11,7 +11,7 @@ Claude edits your timeline. Everything runs on your machine. No credits, no wate
 [![Website](https://img.shields.io/badge/website-cupcat.meetaly.agency-14b8a6.svg)](https://cupcat.meetaly.agency)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)]()
-[![Release](https://img.shields.io/badge/release-v1.7.6-e5484d.svg)](../../releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.7.7-e5484d.svg)](../../releases/latest)
 [![Local & free](https://img.shields.io/badge/AI-100%25%20local%20%C2%B7%20free-2ea043.svg)]()
 
 ### [⬇&nbsp; Download for Windows](../../releases/latest) &nbsp;·&nbsp; [🌐&nbsp; Website & docs](https://cupcat.meetaly.agency)

@@ -3,7 +3,7 @@
 // the decisions that are easy to get subtly wrong and impossible to eyeball in a rendered frame.
 
 import { describe, expect, it } from "bun:test";
-import { buildTracks, iou, padBox, parseBoxes, trackExpr } from "./faceblur";
+import { buildTracks, iou, padBox, parseBoxes, parseFrameBatch, trackExpr } from "./faceblur";
 
 describe("parseBoxes", () => {
   it("reads a clean array", () => {
@@ -159,5 +159,34 @@ describe("trackExpr", () => {
       100,
     );
     expect(e).not.toContain("/0.000");
+  });
+});
+
+describe("parseFrameBatch", () => {
+  it("splits one array per image", () => {
+    const got = parseFrameBatch('[[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}],[],[{"x":0.5,"y":0.1,"w":0.2,"h":0.2},{"x":0.8,"y":0.1,"w":0.1,"h":0.1}]]', 3);
+    expect(got).toHaveLength(3);
+    expect(got[0]).toHaveLength(1);
+    expect(got[1]).toHaveLength(0);
+    expect(got[2]).toHaveLength(2);
+  });
+
+  it("pads a short reply so frames never shift onto the wrong timestamps", () => {
+    const got = parseFrameBatch('[[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}]]', 4);
+    expect(got).toHaveLength(4);
+    expect(got[3]).toEqual([]);
+  });
+
+  it("truncates a reply that returned too many arrays", () => {
+    expect(parseFrameBatch("[[],[],[],[]]", 2)).toHaveLength(2);
+  });
+
+  it("accepts a flat array only when a single frame was requested", () => {
+    expect(parseFrameBatch('[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}]', 1)[0]).toHaveLength(1);
+    expect(parseFrameBatch('[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}]', 3)).toEqual([[], [], []]);
+  });
+
+  it("degrades to empties on unparseable text", () => {
+    expect(parseFrameBatch("sorry, I cannot", 2)).toEqual([[], []]);
   });
 });

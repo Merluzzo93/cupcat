@@ -389,6 +389,17 @@ const EN = {
   "lb.upscale": "Upscale",
   "lb.volume": "Volume (0–1.5)",
   "common.yes": "Yes",
+  "media.stabilize": "Stabilize…",
+  "media.stabilizeHint": "Analyse the camera shake and render a smoothed copy",
+  "media.cleanAudio": "Clean up audio…",
+  "media.cleanAudioHint": "Remove hiss and hum, then level to broadcast loudness",
+  "media.removeGrain": "Remove grain…",
+  "media.removeGrainHint": "Reduce sensor noise in low-light footage",
+  "media.chapters": "Find chapters…",
+  "media.chaptersHint": "Split by topic and place a marker at each chapter",
+  "media.renameItem": "Rename…",
+  "media.duplicate": "Duplicate",
+  "media.deleteN": "Delete {n} assets",
 } as const;
 
 export type Key = keyof typeof EN;
@@ -745,6 +756,17 @@ const IT: Partial<Record<Key, string>> = {
   "lb.upscale": "Aumenta risoluzione",
   "lb.volume": "Volume (0–1.5)",
   "common.yes": "Sì",
+  "media.stabilize": "Stabilizza…",
+  "media.stabilizeHint": "Analizza il tremolio e crea una copia stabilizzata",
+  "media.cleanAudio": "Ripulisci l'audio…",
+  "media.cleanAudioHint": "Toglie fruscio e ronzio, poi livella a volume standard",
+  "media.removeGrain": "Togli la grana…",
+  "media.removeGrainHint": "Riduce il rumore del sensore nelle riprese in poca luce",
+  "media.chapters": "Trova i capitoli…",
+  "media.chaptersHint": "Divide per argomento e mette un marcatore a ogni capitolo",
+  "media.renameItem": "Rinomina…",
+  "media.duplicate": "Duplica",
+  "media.deleteN": "Elimina {n} elementi",
 };
 
 const DICTS: Record<Lang, Partial<Record<Key, string>>> = { en: EN, it: IT };

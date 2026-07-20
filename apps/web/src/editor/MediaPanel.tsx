@@ -241,6 +241,15 @@ export function MediaPanel() {
   // Privacy pass on a single video: the bridge finds the faces, follows them and renders an
   // anonymised copy into the library. Progress streams into the same tool-progress line the AI
   // Clips dialog uses, so a long clip doesn't look stuck.
+  // Local repair passes. Each renders a NEW library asset and leaves the source alone, so the user
+  // can always compare or fall back; progress streams on the shared tool-progress line.
+  const runOnAsset = (tool: string) => {
+    const id = ctxMenu?.id;
+    setCtxMenu(null);
+    if (!id) return;
+    void mcpCall(tool, { media: id });
+  };
+
   const blurFacesFromCtx = () => {
     const id = ctxMenu?.id;
     setCtxMenu(null);
@@ -425,30 +434,54 @@ export function MediaPanel() {
                   onClick={renameFromCtx}
                   className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
                 >
-                  Rename…
+                  {t("media.renameItem")}
                 </button>
                 <button
                   onClick={duplicateFromCtx}
                   className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
                 >
-                  Duplicate
+                  {t("media.duplicate")}
                 </button>
-                {(project?.media ?? []).find((m) => m.id === ctxMenu.id)?.type === "video" && (
-                  <button
-                    onClick={blurFacesFromCtx}
-                    title={t("media.blurFacesHint")}
-                    className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
-                  >
-                    {t("media.blurFaces")}
-                  </button>
-                )}
+                {(() => {
+                  const asset = (project?.media ?? []).find((m) => m.id === ctxMenu.id);
+                  if (!asset) return null;
+                  const isVideo = asset.type === "video";
+                  const hasAudio = isVideo ? asset.hasAudio !== false : asset.type === "audio";
+                  const Item = ({ tool, label, hint }: { tool: string; label: string; hint: string }) => (
+                    <button
+                      onClick={() => runOnAsset(tool)}
+                      title={hint}
+                      className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
+                    >
+                      {label}
+                    </button>
+                  );
+                  return (
+                    <>
+                      <div className="my-1 border-t border-neutral-800" />
+                      {isVideo && (
+                        <button
+                          onClick={blurFacesFromCtx}
+                          title={t("media.blurFacesHint")}
+                          className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
+                        >
+                          {t("media.blurFaces")}
+                        </button>
+                      )}
+                      {isVideo && <Item tool="stabilize_video" label={t("media.stabilize")} hint={t("media.stabilizeHint")} />}
+                      {isVideo && <Item tool="denoise_video" label={t("media.removeGrain")} hint={t("media.removeGrainHint")} />}
+                      {hasAudio && <Item tool="enhance_audio" label={t("media.cleanAudio")} hint={t("media.cleanAudioHint")} />}
+                      {isVideo && hasAudio && <Item tool="auto_chapters" label={t("media.chapters")} hint={t("media.chaptersHint")} />}
+                    </>
+                  );
+                })()}
               </>
             )}
             <button
               onClick={deleteFromCtx}
               className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-red-400 hover:bg-neutral-800"
             >
-              Delete{ctxIds.length > 1 ? ` ${ctxIds.length} assets` : ""}
+              {ctxIds.length > 1 ? t("media.deleteN", { n: ctxIds.length }) : t("common.delete")}
             </button>
           </div>
         </>
