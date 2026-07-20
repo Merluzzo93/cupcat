@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { timelineTotalFrames } from "@cupcat/editor-core";
 import { frameToTimecode } from "./format";
+import { t } from "./i18n";
+import { LanguageSetting } from "./LanguageGate";
 import { ShortcutsEditor } from "./ShortcutsEditor";
 import {
   BRIDGE_HTTP,
@@ -75,6 +77,7 @@ export function Toolbar() {
   const [showClips, setShowClips] = useState(false);
   const [showBeatSync, setShowBeatSync] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const findClip = (id: string) => project?.timeline.tracks.flatMap((t) => t.clips).find((c) => c.id === id);
 
@@ -172,17 +175,17 @@ export function Toolbar() {
         title={canSplit ? "Split the selected clip at the playhead" : "Select a clip and move the playhead inside it to split"}
         className="rounded px-2 py-1 text-xs hover:bg-neutral-800 disabled:opacity-40"
       >
-        Split
+        {t("toolbar.split")}
       </button>
       <button onClick={deleteSelected} disabled={!selectedClipIds.length} className="rounded px-2 py-1 text-xs hover:bg-neutral-800 disabled:opacity-40">
-        Delete
+        {t("toolbar.delete")}
       </button>
       <button onClick={addText} className="rounded px-2 py-1 text-xs hover:bg-neutral-800">
-        + Text
+        {t("toolbar.text")}
       </button>
       <span className="inline-flex items-center overflow-hidden rounded hover:bg-neutral-800">
         <button onClick={addMatte} className="px-2 py-1 text-xs" title="Add a solid-color background clip at the playhead (uses the swatch color)">
-          + Matte
+          {t("toolbar.matte")}
         </button>
         <input
           type="color"
@@ -277,7 +280,15 @@ export function Toolbar() {
 
       <div className="ml-auto flex items-center gap-2">
         <button onClick={() => setShowHelp(true)} className="rounded px-2 py-1 text-xs hover:bg-neutral-800" title="Getting started, shortcuts, glossary, and how to connect an agent">
-          Help
+          {t("toolbar.help")}
+        </button>
+        <button
+          onClick={() => setShowSettings(true)}
+          className="rounded px-2 py-1 text-xs hover:bg-neutral-800"
+          title={t("toolbar.settings")}
+          aria-label={t("toolbar.settings")}
+        >
+          ⚙
         </button>
         <button
           onClick={() => setShowFeedback(true)}
@@ -317,7 +328,7 @@ export function Toolbar() {
           title="Flatten all clips/segments into a single continuous clip"
           className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
         >
-          Merge
+          {t("toolbar.merge")}
         </button>
         <button
           onClick={() => setShowBeatSync(true)}
@@ -325,7 +336,7 @@ export function Toolbar() {
           title="Beat Sync: trim clips so every cut lands on a beat of a music track"
           className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
         >
-          ♫ Beat Sync
+          ♫ {t("toolbar.beatSync")}
         </button>
         <button
           onClick={() => setShowClips(true)}
@@ -333,14 +344,14 @@ export function Toolbar() {
           title="AI Clips: automatically find the most viral moments of a long video and export them as vertical shorts with captions"
           className="rounded border border-violet-500/60 bg-violet-600/20 px-3 py-1 text-xs font-medium text-violet-200 hover:bg-violet-600/35 disabled:opacity-40"
         >
-          AI Clips
+          {t("toolbar.aiClips")}
         </button>
         <button
           onClick={() => setShowExport(true)}
           disabled={!project}
           className="rounded bg-neutral-200 px-3 py-1 text-xs font-medium text-neutral-900 hover:bg-white disabled:opacity-40"
         >
-          Export
+          {t("toolbar.export")}
         </button>
       </div>
 
@@ -350,6 +361,13 @@ export function Toolbar() {
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
       {showFeedback && <FeedbackDialog onClose={() => setShowFeedback(false)} />}
       {showConn && <ConnectionsDialog onClose={() => setShowConn(false)} />}
+      {showSettings && (
+        <Modal title={t("toolbar.settings")} onClose={() => setShowSettings(false)}>
+          <div className="flex flex-col gap-3 text-xs">
+            <LanguageSetting />
+          </div>
+        </Modal>
+      )}
       {showProjects && <ProjectsDialog onClose={() => setShowProjects(false)} />}
     </header>
     {!connected && (
@@ -775,7 +793,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
     setStartedAt(null);
     clearToolProgress();
     if (out.isError) {
-      setError(out.text || "Clip generation failed.");
+      setError(out.text || t("clips.failed"));
       return;
     }
     // Rich result cards from the machine-readable block; plain text stays as a fallback.
@@ -797,13 +815,13 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
     setFolder(out.text);
   };
   return (
-    <Modal title="AI Clips — auto shorts from a long video" onClose={onClose}>
+    <Modal title={t("clips.title")} onClose={onClose}>
       <div className="flex max-h-[78vh] flex-col gap-3 overflow-y-auto text-xs">
         {!clips && (
           <>
             <div className="flex items-end gap-2">
               <label className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="text-neutral-400">Brand preset</span>
+                <span className="text-neutral-400">{t("clips.preset")}</span>
                 <select value={kitName} onChange={(e) => applyKit(e.target.value)} className={inputCls} disabled={busy}>
                   <option value="">None</option>
                   {kits.map((k) => (
@@ -819,7 +837,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
                 title="Save the current caption style, title overlay, format and watermark as a reusable preset"
                 className="shrink-0 rounded border border-neutral-700 px-2 py-1.5 text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
               >
-                Save as preset…
+                {t("clips.savePreset")}
               </button>
               <button
                 onClick={deleteKit}
@@ -827,13 +845,13 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
                 title="Delete the selected preset"
                 className="shrink-0 rounded border border-neutral-700 px-2.5 py-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-red-400 disabled:opacity-40"
               >
-                Delete
+                {t("common.delete")}
               </button>
             </div>
             <label className="flex flex-col gap-1">
-              <span className="text-neutral-400">Video</span>
+              <span className="text-neutral-400">{t("clips.video")}</span>
               <select value={media} onChange={(e) => setMedia(e.target.value)} className={inputCls} disabled={busy}>
-                {videos.length === 0 && <option value="">(no videos in the library)</option>}
+                {videos.length === 0 && <option value="">{t("clips.noVideos")}</option>}
                 {videos.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name}
@@ -843,28 +861,28 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
             </label>
             <div className="grid grid-cols-3 gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">How many clips</span>
+                <span className="text-neutral-400">{t("clips.howMany")}</span>
                 <input type="number" min={1} max={10} value={count} onChange={(e) => setCount(Number(e.target.value) || 3)} className={inputCls} disabled={busy} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">Shortest (sec)</span>
+                <span className="text-neutral-400">{t("clips.shortest")}</span>
                 <input type="number" min={3} value={minS} onChange={(e) => setMinS(Number(e.target.value) || 15)} className={inputCls} disabled={busy} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">Longest (sec)</span>
+                <span className="text-neutral-400">{t("clips.longest")}</span>
                 <input type="number" min={5} value={maxS} onChange={(e) => setMaxS(Number(e.target.value) || 60)} className={inputCls} disabled={busy} />
               </label>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">Format</span>
+                <span className="text-neutral-400">{t("clips.format")}</span>
                 <select value={aspect} onChange={(e) => setAspect(e.target.value as "9:16" | "original")} className={inputCls} disabled={busy}>
-                  <option value="9:16">Vertical 9:16 — Shorts & Reels</option>
-                  <option value="original">Keep original shape</option>
+                  <option value="9:16">{t("clips.formatVertical")}</option>
+                  <option value="original">{t("clips.formatOriginal")}</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-neutral-400">Caption style</span>
+                <span className="text-neutral-400">{t("clips.captionStyle")}</span>
                 <select value={capStyle} onChange={(e) => setCapStyle(e.target.value)} className={inputCls} disabled={busy || !captions}>
                   <option value="karaoke">Karaoke — yellow active word</option>
                   <option value="clean">Clean — bold white</option>
@@ -876,25 +894,25 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
             <div className="flex items-center gap-5">
               <label className="flex items-center gap-2 text-neutral-300">
                 <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} disabled={busy} />
-                Captions
+                {t("clips.captions")}
               </label>
               <label className="flex items-center gap-2 text-neutral-300" title="Burns the AI title at the top of the clip for the first seconds">
                 <input type="checkbox" checked={titleOverlay} onChange={(e) => setTitleOverlay(e.target.checked)} disabled={busy} />
-                Title overlay
+                {t("clips.titleOverlay")}
               </label>
             </div>
             <label className="flex flex-col gap-1">
-              <span className="text-neutral-400">What should the clips be about? (optional)</span>
-              <input value={prompt} onChange={(e) => setPrompt(e.target.value)} className={inputCls} disabled={busy} placeholder="Leave empty to find the most engaging moments" />
-              <span className="text-[10px] text-neutral-500">For example: “only the parts about pricing”.</span>
+              <span className="text-neutral-400">{t("clips.about")}</span>
+              <input value={prompt} onChange={(e) => setPrompt(e.target.value)} className={inputCls} disabled={busy} placeholder={t("clips.aboutPlaceholder")} />
+              <span className="text-[10px] text-neutral-500">{t("clips.aboutHint")}</span>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-neutral-400">Words to censor (optional)</span>
-              <input value={beep} onChange={(e) => setBeep(e.target.value)} className={inputCls} disabled={busy} placeholder="Separate with commas — e.g. brandname, competitor" />
-              <span className="text-[10px] text-neutral-500">Each one is covered with a beep.</span>
+              <span className="text-neutral-400">{t("clips.censor")}</span>
+              <input value={beep} onChange={(e) => setBeep(e.target.value)} className={inputCls} disabled={busy} placeholder={t("clips.censorPlaceholder")} />
+              <span className="text-[10px] text-neutral-500">{t("clips.censorHint")}</span>
             </label>
             <div className="flex flex-col gap-1">
-              <span className="text-neutral-400">Logo (optional)</span>
+              <span className="text-neutral-400">{t("clips.logo")}</span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -902,7 +920,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
                   disabled={busy}
                   className="shrink-0 rounded border border-neutral-700 px-2.5 py-1.5 text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
                 >
-                  Choose image…
+                  {t("clips.chooseImage")}
                 </button>
                 {watermark ? (
                   <>
@@ -920,10 +938,10 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
                     </button>
                   </>
                 ) : (
-                  <span className="flex-1 text-neutral-600">No logo — clips stay clean</span>
+                  <span className="flex-1 text-neutral-600">{t("clips.noLogo")}</span>
                 )}
               </div>
-              {watermark && <span className="text-[10px] text-neutral-500">Placed top-right on every clip.</span>}
+              {watermark && <span className="text-[10px] text-neutral-500">{t("clips.logoHint")}</span>}
             </div>
           </>
         )}
@@ -933,17 +951,14 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
           <div className="flex flex-col gap-2 rounded-lg border border-violet-900/60 bg-violet-950/20 p-3">
             <div className="flex items-center gap-2">
               <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
-              <span className="min-w-0 flex-1 truncate font-medium text-violet-100">{toolProgress?.text ?? "Starting…"}</span>
+              <span className="min-w-0 flex-1 truncate font-medium text-violet-100">{toolProgress?.text ?? t("clips.starting")}</span>
               <span className="shrink-0 font-mono text-[11px] text-violet-300/80">{elapsed}</span>
             </div>
             <div className="h-1 overflow-hidden rounded-full bg-violet-950">
               {/* Indeterminate: the pipeline can't report a real percentage, so don't fake one. */}
               <div className="h-full w-1/3 animate-[cupcatSlide_1.6s_ease-in-out_infinite] rounded-full bg-violet-500/80" />
             </div>
-            <span className="text-[10px] text-violet-300/70">
-              Transcribing the video, then picking the best moments, then exporting each clip. Long videos take a few minutes — the
-              transcript is cached, so running this again on the same video is much faster.
-            </span>
+            <span className="text-[10px] text-violet-300/70">{t("clips.progressHint")}</span>
           </div>
         )}
         {error && <div className="whitespace-pre-wrap rounded border border-red-900 bg-red-950/40 p-2 text-red-300">{error}</div>}
@@ -971,18 +986,18 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               </div>
             ))}
             <div className="text-[10px] text-neutral-500">
-              Saved in <span className="select-all text-neutral-400">{folder}</span> and added to the library — drag them to the timeline or export as-is.
+              {t("clips.savedIn")} <span className="select-all text-neutral-400">{folder}</span> {t("clips.savedTail")}
             </div>
           </div>
         )}
         {clips && clips.length === 0 && folder && <div className="whitespace-pre-wrap rounded border border-emerald-900 bg-emerald-950/30 p-2 text-emerald-200">{folder}</div>}
         <div className="flex items-center justify-between">
           <span className="text-neutral-500">
-            {busy ? "You can keep working — this runs in the background." : clips ? "" : "Finished clips appear in your library, ready to use."}
+            {busy ? t("clips.backgroundNote") : clips ? "" : t("clips.landing")}
           </span>
           {clips ? (
             <button onClick={() => setClips(null)} className="rounded border border-neutral-700 px-4 py-1.5 font-medium text-neutral-200 hover:bg-neutral-800">
-              New batch
+              {t("clips.newBatch")}
             </button>
           ) : (
             <button
@@ -990,7 +1005,7 @@ function AiClipsDialog({ onClose }: { onClose: () => void }) {
               disabled={busy || !media}
               className="rounded bg-violet-600 px-4 py-1.5 font-medium text-white hover:bg-violet-500 disabled:opacity-40"
             >
-              {busy ? "Creating…" : "Create clips"}
+              {busy ? t("clips.creating") : t("clips.create")}
             </button>
           )}
         </div>
@@ -1228,7 +1243,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
     setCapturing(false);
     setBusy(false);
     if (res.ok && res.path) setPath(res.path);
-    else setError(res.error || "Creazione del pacchetto fallita — il bridge è raggiungibile?");
+    else setError(res.error || t("feedback.failed"));
   };
 
   const copyPath = () => {
@@ -1244,7 +1259,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
 
   if (capturing) return null; // don't paint the modal while the bridge screenshots the screen
   return (
-    <Modal title="Feedback" onClose={onClose}>
+    <Modal title={t("feedback.title")} onClose={onClose}>
       <div className="space-y-3 text-xs">
         {!path ? (
           <>
@@ -1267,20 +1282,20 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
                 disabled={busy}
               />
             </label>
-            <p className="text-[11px] text-neutral-500">Il pacchetto include screenshot, progetto e log — controlla prima di inviarlo.</p>
+            <p className="text-[11px] text-neutral-500">{t("feedback.includes")}</p>
             {error && <div className="rounded border border-red-900 bg-red-950/40 p-2 text-red-300">{error}</div>}
             <button
               onClick={() => void submit()}
               disabled={busy || !description.trim()}
               className="w-full rounded-md bg-neutral-200 px-3 py-2 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
             >
-              {busy ? "Creazione pacchetto…" : "Crea pacchetto feedback"}
+              {busy ? t("feedback.creating") : t("feedback.create")}
             </button>
           </>
         ) : (
           <>
             <div className="rounded border border-emerald-900 bg-emerald-950/30 p-2 text-emerald-200">
-              Pacchetto creato: <span className="select-all break-all font-mono text-[11px]">{path}</span>
+              {t("feedback.created")} <span className="select-all break-all font-mono text-[11px]">{path}</span>
             </div>
             <p className="text-neutral-400">Invialo allo sviluppatore (mail, chat…) allegando il file.</p>
             <button onClick={copyPath} className="w-full rounded-md bg-neutral-200 px-3 py-2 font-medium text-neutral-900 hover:bg-white">
@@ -1328,7 +1343,7 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
   );
 
   return (
-    <Modal title="Connections" onClose={onClose}>
+    <Modal title={t("conn.title")} onClose={onClose}>
       <div className="space-y-3 text-xs">
         <Row
           name="Claude"
@@ -1349,7 +1364,7 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
                 disabled={claudeLoginBusy}
                 className="w-fit rounded-md bg-neutral-200 px-3 py-1 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
               >
-                {claudeLoginBusy ? "Opening…" : "Sign in to Claude"}
+                {claudeLoginBusy ? t("setup.opening") : t("conn.claudeSignIn")}
               </button>
               {claudeLoginProgress && (
                 <span className="text-[11px] text-neutral-400">{claudeLoginProgress}</span>
@@ -1357,7 +1372,7 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
               {claudeLoginUrl && (
                 <span className="text-[11px] text-neutral-400">
                   Browser didn't open?{" "}
-                  <a href={claudeLoginUrl} target="_blank" rel="noopener noreferrer" className="text-violet-400 underline">open the sign-in link</a>
+                  <a href={claudeLoginUrl} target="_blank" rel="noopener noreferrer" className="text-violet-400 underline">{t("conn.openSignInLink")}</a>
                 </span>
               )}
               {claudeCodeNeeded && (
@@ -1368,19 +1383,19 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && code.trim()) submitClaudeCode(code.trim());
                     }}
-                    placeholder="Paste the code from the browser"
+                    placeholder={t("conn.pasteCode")}
                     className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-neutral-100 placeholder:text-neutral-600"
                   />
                   <button
                     onClick={() => code.trim() && submitClaudeCode(code.trim())}
                     className="shrink-0 rounded-md bg-neutral-200 px-3 py-1.5 font-medium text-neutral-900 hover:bg-white"
                   >
-                    Connect
+                    {t("conn.connect")}
                   </button>
                 </div>
               )}
               <button onClick={() => setShowKey((v) => !v)} className="w-fit text-[11px] text-neutral-500 hover:text-neutral-300">
-                or use an Anthropic API key instead
+                {t("conn.useApiKey")}
               </button>
               {showKey && (
                 <div className="flex gap-1.5">
@@ -1418,12 +1433,12 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
                 disabled={setupBusy}
                 className="w-fit rounded-md bg-neutral-200 px-3 py-1 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
               >
-                {setupBusy ? "Opening…" : "Sign in to Higgsfield"}
+                {setupBusy ? t("setup.opening") : t("setup.signIn")}
               </button>
               {higgsfieldLoginUrl && (
                 <span className="text-[11px] text-neutral-400">
                   Browser didn't open?{" "}
-                  <a href={higgsfieldLoginUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline">open the login link</a>
+                  <a href={higgsfieldLoginUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline">{t("conn.openSignInLink")}</a>
                 </span>
               )}
             </div>
@@ -1434,9 +1449,9 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
           disabled={setupBusy}
           className="w-full rounded-md border border-neutral-700 px-3 py-2 hover:bg-neutral-800 disabled:opacity-50"
         >
-          {setupBusy ? "Checking…" : "Re-check connections"}
+          {setupBusy ? t("conn.checking") : t("conn.recheck")}
         </button>
-        <p className="text-[11px] text-neutral-500">Status refreshes automatically every 25s while the app is open.</p>
+        <p className="text-[11px] text-neutral-500">{t("conn.refreshNote")}</p>
       </div>
     </Modal>
   );

@@ -1,4 +1,5 @@
 import type React from "react";
+import { t } from "./i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Clip } from "@cupcat/editor-core";
 import { isCompatible, timelineTotalFrames } from "@cupcat/editor-core";
@@ -625,7 +626,7 @@ export function Timeline() {
               </div>
             );
           })}
-          {tracks.length === 0 && <div className="p-2 text-[10px] text-neutral-600">no tracks</div>}
+          {tracks.length === 0 && <div className="p-2 text-[10px] text-neutral-600">{t("timeline.noTracks")}</div>}
         </div>
 
         {/* ── Timeline content (scrolls with the shared container above) ── */}

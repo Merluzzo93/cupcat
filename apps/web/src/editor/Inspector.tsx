@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "./i18n";
 import { LOOKS } from "@cupcat/editor-core";
 import type { Clip, ColorGrade, Effect, Interpolation, MediaAsset, Project } from "@cupcat/editor-core";
 import { computeReframeKeyframes, fitHeightWidth, positionRows, waitForVideoMetadata } from "./autoReframe";
@@ -137,7 +138,7 @@ function ProjectInspector({ project }: { project: Project }) {
     <div className="space-y-4 p-3 text-[11px]">
       <h3 className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Project settings</h3>
       <div>
-        <label className="mb-1 block text-neutral-500">Resolution</label>
+        <label className="mb-1 block text-neutral-500">{t("details.resolution")}</label>
         <select
           value={known ? cur : "__custom"}
           onChange={(e) => {
@@ -159,7 +160,7 @@ function ProjectInspector({ project }: { project: Project }) {
         </select>
       </div>
       <div>
-        <label className="mb-1 block text-neutral-500">Frame rate</label>
+        <label className="mb-1 block text-neutral-500">{t("details.frameRate")}</label>
         <select
           value={tl.fps}
           onChange={(e) => sendCommand("set_project_format", { width: tl.width, height: tl.height, fps: Number(e.target.value) })}
@@ -173,7 +174,7 @@ function ProjectInspector({ project }: { project: Project }) {
           ))}
         </select>
       </div>
-      <p className="border-t border-neutral-800 pt-3 text-neutral-600">Select a clip or asset to edit it.</p>
+      <p className="border-t border-neutral-800 pt-3 text-neutral-600">{t("details.selectHint")}</p>
     </div>
   );
 }

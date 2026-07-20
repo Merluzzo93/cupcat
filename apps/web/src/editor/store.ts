@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from "react";
 import type { Clip, Project } from "@cupcat/editor-core";
 import { summarizeProjectChange } from "./projectDiff";
+import { getLang, type Lang, setLang, storedLang } from "./i18n";
 
 // When the SPA is served by the bridge (production / desktop), talk to the same origin the page was
 // loaded from — this avoids the localhost-vs-127.0.0.1 CORS mismatch. In dev (vite on another port),
@@ -71,6 +72,8 @@ export interface EditorState {
   update: { latest: string; downloadUrl: string | null; releaseUrl: string | null; notes: string | null } | null; // newer GitHub release
   updateDismissed: boolean;
   toolProgress: { tool: string; text: string } | null; // live phase of a long-running tool (auto_clips…)
+  lang: Lang; // interface language; kept in state so a change re-renders every component
+  langChosen: boolean; // false until the user picks one → show the first-run picker
   // in-app AI assistant
   chat: ChatTurn[];
   chatList: { id: string; title: string; ts: number }[]; // conversation history (this project)
@@ -114,6 +117,8 @@ let state: EditorState = {
   update: null,
   updateDismissed: false,
   toolProgress: null,
+  lang: getLang(),
+  langChosen: storedLang() !== null,
   setupBusy: false,
   chat: [],
   chatList: [],
@@ -535,6 +540,12 @@ export function dismissUpdate(): void {
 /** Reset the long-tool progress line (call when starting or finishing a run). */
 export function clearToolProgress(): void {
   setState({ toolProgress: null });
+}
+
+/** Set the interface language (first-run picker and Settings both call this). */
+export function chooseLang(l: Lang): void {
+  setLang(l);
+  setState({ lang: l, langChosen: true });
 }
 
 /** Switch to (or create) a project. The new project arrives via the WS "state" broadcast; the

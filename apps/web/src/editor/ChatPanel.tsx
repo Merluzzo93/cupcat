@@ -3,6 +3,7 @@
 // Palmier's "Sonnet 4.6" chip); selected library assets ride along as @-mentioned references.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { t } from "./i18n";
 import { clearChat, deleteChat, newChat, recheckConnections, selectChat, sendChat, setAnthropicKey, stopChat, ui, useEditor } from "./store";
 import type { MediaAsset } from "@cupcat/editor-core";
 import { assetTypeIcon, filterAssets, findMentionToken, insertMention } from "./chatMentions";
@@ -163,8 +164,8 @@ export function ChatPanel() {
     if (single) addAssets([single]);
   };
   const handleDragOver = (e: React.DragEvent<HTMLElement>) => {
-    const t = e.dataTransfer.types;
-    if (t.includes("application/x-cupcat-asset") || t.includes("application/x-cupcat-assets")) {
+    const types = e.dataTransfer.types; // not `t` — that's the translate function in this module
+    if (types.includes("application/x-cupcat-asset") || types.includes("application/x-cupcat-assets")) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
       if (!dragOver) setDragOver(true);
@@ -239,7 +240,7 @@ export function ChatPanel() {
         * controls is visible. Left label shrinks first; the history select flexes; every action
         * is icon-only with a tooltip. */}
       <div className="relative flex items-center gap-1 border-b border-neutral-800 px-3 py-2">
-        <span className="min-w-0 shrink truncate text-xs font-medium uppercase tracking-wide text-neutral-400">Assistant</span>
+        <span className="min-w-0 shrink truncate text-xs font-medium uppercase tracking-wide text-neutral-400">{t("chat.title")}</span>
         <div className="ml-auto flex min-w-0 items-center gap-1">
           {chatList.length > 0 && (
             // w-24 (not w-0+basis): with width:0 the flex parent measured this select at 0px and
@@ -326,9 +327,9 @@ export function ChatPanel() {
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
         {chat.length === 0 && (
           <div className="space-y-2 text-xs leading-relaxed text-neutral-500">
-            <p className="text-neutral-300">Describe the shot or edit you want, in plain language.</p>
+            <p className="text-neutral-300">{t("chat.empty")}</p>
             <p>e.g. "zoom in on the water on the first clip", "generate a 5s timelapse", "add Italian subtitles".</p>
-            <p>Select assets in the library to reference them with @.</p>
+            <p>{t("chat.emptyHint")}</p>
           </div>
         )}
         {chat.map((turn, i) => (
@@ -477,7 +478,7 @@ export function ChatPanel() {
                 onKeyDown={handleTextareaKeyDown}
                 onPaste={handlePaste}
                 rows={1}
-                placeholder="Ask, or type @ to reference media"
+                placeholder={t("chat.placeholder")}
                 className="block w-full resize-none overflow-y-auto bg-transparent px-3 pt-2 text-xs leading-5 text-neutral-200 outline-none placeholder:text-neutral-600"
               />
               <div className="flex items-center justify-between px-2 pb-2">

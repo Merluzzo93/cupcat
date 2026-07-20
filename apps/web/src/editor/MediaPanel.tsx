@@ -1,4 +1,5 @@
 import type { MediaAsset, MediaFolder } from "@cupcat/editor-core";
+import { t } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { importFiles, mcpCall, mediaUrl, ui, useEditor } from "./store";
 
@@ -282,19 +283,19 @@ export function MediaPanel() {
 
       {/* ── item count + type filter chips ── */}
       <div className="flex items-center gap-1 border-b border-neutral-800 px-2 py-1.5">
-        <span className="mr-auto pl-0.5 text-[10px] tabular-nums text-neutral-500">
-          {searching ? `${results.length} results` : `${subFolders.length + levelMedia.length} items`}
+        <span className="mr-auto whitespace-nowrap pl-0.5 text-[10px] tabular-nums text-neutral-500">
+          {searching ? `${results.length} results` : t("media.items", { n: subFolders.length + levelMedia.length })}
         </span>
-        {(["all", "video", "audio", "image"] as const).map((t) => (
+        {(["all", "video", "audio", "image"] as const).map((kind) => (
           <button
-            key={t}
+            key={kind}
             type="button"
-            onClick={() => setTypeFilter(t)}
-            className={`rounded-full px-2 py-0.5 text-[10px] capitalize ${
-              typeFilter === t ? "bg-neutral-200 font-medium text-neutral-900" : "text-neutral-400 hover:bg-neutral-800"
+            onClick={() => setTypeFilter(kind)}
+            className={`rounded-full px-2 py-0.5 text-[10px] ${
+              typeFilter === kind ? "bg-neutral-200 font-medium text-neutral-900" : "text-neutral-400 hover:bg-neutral-800"
             }`}
           >
-            {t === "all" ? "All" : t}
+            {t(`media.${kind}` as Parameters<typeof t>[0])}
           </button>
         ))}
       </div>
@@ -380,7 +381,7 @@ export function MediaPanel() {
               <p className="px-1 py-2 text-xs leading-relaxed text-neutral-500">
                 {curId
                   ? "This folder is empty — drag media onto its tile to move files in."
-                  : "No media yet — press + to import, or ✨ to generate."}
+                  : t("media.empty")}
               </p>
             )}
           </>
@@ -480,7 +481,7 @@ export function MediaPanel() {
 }
 
 // ── LibraryToolbar ────────────────────────────────────────────────────────────
-// Palmier-style single row: + Import · new-folder · ✨ generate toggle · search.
+// Palmier-style single row: {t("media.import")} · new-folder · ✨ generate toggle · search.
 // The import pickers (files / folder / path / URL) live in the collapsible section below it.
 
 function LibraryToolbar({
@@ -587,7 +588,7 @@ function LibraryToolbar({
             open ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
           }`}
         >
-          + Import
+          {t("media.import")}
         </button>
         <button
           onClick={onNewFolder}
@@ -623,7 +624,7 @@ function LibraryToolbar({
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search"
+          placeholder={t("media.search")}
           className="min-w-0 flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-600"
         />
       </div>
