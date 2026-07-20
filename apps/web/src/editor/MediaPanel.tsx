@@ -238,6 +238,16 @@ export function MediaPanel() {
       ? selectedAssetIds
       : [ctxMenu.id]
     : [];
+  // Privacy pass on a single video: the bridge finds the faces, follows them and renders an
+  // anonymised copy into the library. Progress streams into the same tool-progress line the AI
+  // Clips dialog uses, so a long clip doesn't look stuck.
+  const blurFacesFromCtx = () => {
+    const id = ctxMenu?.id;
+    setCtxMenu(null);
+    if (!id) return;
+    void mcpCall("blur_faces", { media: id });
+  };
+
   const deleteFromCtx = () => {
     if (ctxIds.length) void mcpCall("delete_media", { assetIds: ctxIds });
     setCtxMenu(null);
@@ -423,6 +433,15 @@ export function MediaPanel() {
                 >
                   Duplicate
                 </button>
+                {(project?.media ?? []).find((m) => m.id === ctxMenu.id)?.type === "video" && (
+                  <button
+                    onClick={blurFacesFromCtx}
+                    title={t("media.blurFacesHint")}
+                    className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
+                  >
+                    {t("media.blurFaces")}
+                  </button>
+                )}
               </>
             )}
             <button

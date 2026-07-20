@@ -29,6 +29,7 @@ import { killTagged, run } from "./proc";
 import { emitProgress } from "./progress";
 import { type ExportFormat, type ExportQuality, ensureCompoundBake, exportTimeline, renderFrameAndScopes, renderFrameToFile, renderFrames, renderTimelineView, saveRangeToFile } from "./export";
 import { autoClips } from "./clips";
+import { renderFaceBlur } from "./faceblur";
 import { autoRoughCut } from "./roughcut";
 import { reframeLocal } from "./reframe-local";
 import { applyTemplate, listTemplates, saveTemplate } from "./templates";
@@ -1603,6 +1604,47 @@ async function autoRoughCutTool(ctx: BridgeContext, args: Args): Promise<ToolOut
   }
 }
 
+/** Cover every face in a library video and register the anonymised copy as a new asset. */
+async function blurFacesTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.media);
+  const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
+  if (!a) return fail(`Asset not found: ${ref ?? "(media is required — pass a library video's id or name)"}`);
+  if (a.type !== "video" || !a.url) return fail("blur_faces needs a VIDEO asset from the library.");
+  try {
+    const res = await renderFaceBlur(a.url, {
+      onProgress: (text) => emitProgress("blur_faces", text),
+      mode: strOpt(args.mode) === "pixelate" ? "pixelate" : "blur",
+      strength: numOpt(args.strength),
+      everySeconds: numOpt(args.everySeconds),
+      padding: numOpt(args.padding),
+      durationSeconds: a.durationSeconds && a.durationSeconds > 0 ? a.durationSeconds : undefined,
+    });
+    const probe = await probeMedia(res.file);
+    const id = newId("asset");
+    ctx.doc.addAsset({
+      id,
+      type: "video",
+      name: `${a.name} (faces blurred)`,
+      url: res.file,
+      durationSeconds: probe.durationSeconds,
+      sourceWidth: probe.width,
+      sourceHeight: probe.height,
+      sourceFPS: probe.fps,
+      hasAudio: probe.hasAudio,
+      generationStatus: { kind: "none" },
+    } as MediaAsset);
+    void ensureThumbnail(res.file).catch(() => {});
+    void ensureAudioProxy(res.file).catch(() => {});
+    ctx.doc.notifyChanged();
+    return ok(
+      `Covered ${res.faces} face(s) across ${res.coveredSeconds}s and added "${a.name} (faces blurred)" to the library.
+File: ${res.file}`,
+    );
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function autoClipsTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const ref = strOpt(args.media);
   const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
@@ -2261,6 +2303,8 @@ export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Arg
         return await analyzeFootageTool(ctx.doc, args);
       case "capture_frame":
         return await captureFrame(ctx, args);
+      case "blur_faces":
+        return await blurFacesTool(ctx, args);
       case "auto_clips":
         return await autoClipsTool(ctx, args);
       case "auto_rough_cut":

@@ -579,6 +579,21 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "blur_faces",
+    description:
+      "PRIVACY / FACE BLUR: find every human face in a library video and render a copy with each one covered, following it as it moves. THE tool whenever the user wants faces blurred, hidden, censored, anonymised, pixelated, made unrecognisable, or asks to 'protect people's privacy' / 'hide bystanders' / 'GDPR' in footage. Faces are found by looking at sampled frames (works on profiles, background people and faces on screens), each face is tracked, and a face that leaves the shot stops being covered. Produces a NEW library video — the original is untouched. Cost scales with length: sample every 2-3s on long footage, every 0.5-1s when people move fast.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library video asset id (or exact name) whose faces should be covered." },
+        mode: { type: "string", enum: ["blur", "pixelate"], description: "blur = soft smear (default); pixelate = mosaic squares, the classic TV anonymisation look." },
+        strength: { type: "integer", description: "1-10, how unrecognisable (default 6). Scaled to face size, so it holds at any resolution." },
+        everySeconds: { type: "number", description: "Seconds between sampled frames (default 1). Lower = follows fast movement better but costs more; raise to 2-3 on long or static footage." },
+        padding: { type: "number", description: "Extra margin around each face as a fraction of its size (default 0.18). Raise if hair or a chin peeks out." },
+      },
+      ["media"],
+    ),
+  },
+  {
     name: "auto_clips",
     description:
       "AI CLIPPING (OpusClip-style): analyze a long library video's speech and automatically create the N most viral-worthy SHORT CLIPS — each self-contained with a hook, exported as its own file (9:16 vertical + burned karaoke captions by default) and added to the library with a title and virality score. THE tool for 'make clips/shorts/reels from this video'. Needs speech (uses the transcript) and the Claude connection used by chat. Runs one export per clip — expect ~1 minute of work per clip.",

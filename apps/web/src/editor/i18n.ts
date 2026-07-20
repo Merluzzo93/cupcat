@@ -154,6 +154,8 @@ const EN = {
   "media.folderName": "Folder name:",
   "media.rename": "Rename",
   "media.generate": "Generate",
+  "media.blurFaces": "Blur faces…",
+  "media.blurFacesHint": "Find every face and render an anonymised copy into your library",
 
   // ── chat ──
   "chat.title": "Assistant",
@@ -307,6 +309,8 @@ const IT: Partial<Record<Key, string>> = {
   "media.folderName": "Nome cartella:",
   "media.rename": "Rinomina",
   "media.generate": "Genera",
+  "media.blurFaces": "Sfoca i volti…",
+  "media.blurFacesHint": "Trova ogni volto e crea nella libreria una copia anonimizzata",
 
   "chat.title": "Assistente",
   "chat.placeholder": "Chiedi, o scrivi @ per citare un media",
