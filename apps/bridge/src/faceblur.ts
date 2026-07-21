@@ -12,7 +12,7 @@
 
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { exportsDir, FFMPEG_BIN } from "./config";
+import { exportsDir, FFMPEG_BIN, FFPROBE_BIN } from "./config";
 import { frameToBase64, probeMedia, withTranscodeSlot } from "./ffmpeg";
 import { oneShotVision } from "./agent-chat";
 import { run } from "./proc";
@@ -49,12 +49,14 @@ const BATCH = 5;
 
 const SYSTEM = [
   "You locate human faces in video frames.",
-  "You are given N images. Reply with ONLY a JSON array of N arrays — one per image, in the same order.",
-  'Each inner element: {"x":0.12,"y":0.08,"w":0.15,"h":0.22} — the face\'s bounding box as fractions of that image\'s width/height, origin at the TOP-LEFT.',
+  "You are given N images. Reply with ONLY a JSON array of N objects, one per image.",
+  'Each object: {"i":0,"faces":[{"x":0.12,"y":0.08,"w":0.15,"h":0.22}]}',
+  '"i" is the image\'s index in the order given, starting at 0. ALWAYS include it — results are matched by "i", not by position.',
+  "Box coordinates are fractions of THAT image's width/height, origin at the TOP-LEFT.",
   "Box the head: forehead to chin, ear to ear. Exclude neck and shoulders.",
   "Include every human face: background people, faces on screens or posters, partial and profile faces.",
   "Do NOT include animal faces, statues, drawings or logos.",
-  "An image with no face gets an empty array. Example for 3 images: [[{...}],[],[{...},{...}]]",
+  'An image with no face gets an empty list. Example for 3 images: [{"i":0,"faces":[{...}]},{"i":1,"faces":[]},{"i":2,"faces":[{...}]}]',
 ].join("\n");
 
 /** Parse the model's reply into boxes, tolerating stray prose or a code fence. */
@@ -92,26 +94,42 @@ export function parseBoxes(raw: string): { x: number; y: number; w: number; h: n
  * treated as "all of it belongs to the first frame" only when a single frame was asked for.
  */
 export function parseFrameBatch(raw: string, expected: number): { x: number; y: number; w: number; h: number }[][] {
+  const out: { x: number; y: number; w: number; h: number }[][] = Array.from({ length: expected }, () => []);
   const start = raw.indexOf("[");
   const end = raw.lastIndexOf("]");
-  const out: { x: number; y: number; w: number; h: number }[][] = [];
-  if (start >= 0 && end > start) {
-    try {
-      const arr = JSON.parse(raw.slice(start, end + 1)) as unknown;
-      if (Array.isArray(arr)) {
-        const nested = arr.some((e) => Array.isArray(e));
-        if (nested) {
-          for (const grp of arr) out.push(Array.isArray(grp) ? parseBoxes(JSON.stringify(grp)) : []);
-        } else if (expected === 1) {
-          out.push(parseBoxes(raw));
-        }
-      }
-    } catch {
-      /* fall through to the padding below */
-    }
+  if (start < 0 || end <= start) return out;
+  let arr: unknown;
+  try {
+    arr = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return out;
   }
-  while (out.length < expected) out.push([]);
-  return out.slice(0, expected);
+  if (!Array.isArray(arr)) return out;
+
+  // Preferred shape: objects carrying their own index. Boxes are placed BY that index, so a reply
+  // that comes back reordered still lands on the right frame — getting this wrong stamps one
+  // moment's face onto another moment's timestamp, which is exactly how a blurred face ends up
+  // pasted where nobody is standing.
+  const indexed = arr.filter((e): e is Record<string, unknown> => !!e && typeof e === "object" && !Array.isArray(e) && "i" in e);
+  if (indexed.length > 0) {
+    for (const o of indexed) {
+      const idx = typeof o.i === "number" ? o.i : Number.NaN;
+      if (!Number.isInteger(idx) || idx < 0 || idx >= expected) continue; // unusable index — drop it
+      const faces = o.faces;
+      if (Array.isArray(faces)) out[idx] = parseBoxes(JSON.stringify(faces));
+    }
+    return out;
+  }
+
+  // Fallback for a reply that ignored the format: arrays in order.
+  const nested = arr.filter((e) => Array.isArray(e));
+  if (nested.length > 0) {
+    for (let i = 0; i < Math.min(nested.length, expected); i++) out[i] = parseBoxes(JSON.stringify(nested[i]));
+    return out;
+  }
+  // A flat list of boxes is only unambiguous when a single frame was asked about.
+  if (expected === 1) out[0] = parseBoxes(raw);
+  return out;
 }
 
 /** Grow a box by `pad` on every side, clamped to the frame. */
@@ -187,7 +205,9 @@ export async function detectFaces(srcPath: string, opts: DetectOptions): Promise
   const every = Math.max(0.2, opts.everySeconds ?? 1);
   const start = Math.max(0, opts.startSeconds ?? 0);
   const end = Math.max(start, opts.durationSeconds);
-  const pad = opts.padding ?? 0.18;
+  // The cover is an inscribed ellipse, which touches less than the box it sits in — so the box has
+  // to be grown more than a rectangular patch would need or the chin and hairline poke out.
+  const pad = opts.padding ?? 0.34;
   const progress = opts.onProgress ?? (() => {});
 
   const times: number[] = [];
@@ -212,7 +232,7 @@ export async function detectFaces(srcPath: string, opts: DetectOptions): Promise
         try {
           const raw = await oneShotVision(
             SYSTEM,
-            `${usable.length} frames, in order: ${usable.map((f) => `${f.t.toFixed(2)}s`).join(", ")}. Return ${usable.length} arrays.`,
+            `${usable.length} images. Return one object per image with its "i" index (0..${usable.length - 1}).`,
             usable.map((f) => ({ data: f.img, mediaType: "image/jpeg" })),
             { maxTokens: 1600 },
           );
@@ -254,6 +274,22 @@ export async function supportsFilterScriptFromFile(): Promise<boolean> {
   return filterScriptStyle;
 }
 
+/** True when the source carries 90°/270° rotation metadata (portrait phone footage). ffmpeg
+ * autorotates on decode, so any pixel maths from the probe must use the swapped dimensions. */
+async function isRotated90(srcPath: string): Promise<boolean> {
+  const { stdout, code } = await run(FFPROBE_BIN, [
+    "-v", "error", "-select_streams", "v:0", "-show_entries", "stream_side_data=rotation", "-of", "json", srcPath,
+  ]);
+  if (code !== 0) return false;
+  try {
+    const streams = (JSON.parse(stdout) as { streams?: { side_data_list?: { rotation?: number }[] }[] }).streams;
+    const rotation = streams?.[0]?.side_data_list?.find((sd) => typeof sd.rotation === "number")?.rotation ?? 0;
+    return Math.abs(rotation) % 180 === 90;
+  } catch {
+    return false;
+  }
+}
+
 export interface BlurResult {
   file: string;
   faces: number;
@@ -281,8 +317,14 @@ export async function renderFaceBlur(srcPath: string, opts: BlurOptions = {}): P
   const probe = await probeMedia(srcPath);
   const duration = opts.durationSeconds ?? probe.durationSeconds;
   if (!(duration > 0)) throw new Error("Can't read this video's duration — the file may be unreadable.");
-  const W = probe.width && probe.width > 0 ? probe.width : 1920;
-  const H = probe.height && probe.height > 0 ? probe.height : 1080;
+  // Phone footage carries 90°/270° rotation metadata: ffprobe reports the STORED dimensions while
+  // ffmpeg autorotates on decode, so the filter graph sees them swapped. Using the stored pair put
+  // every patch at the wrong place and the wrong size — the "face pasted somewhere else" bug.
+  const rotated = await isRotated90(srcPath);
+  const pw = probe.width && probe.width > 0 ? probe.width : 1920;
+  const ph = probe.height && probe.height > 0 ? probe.height : 1080;
+  const W = rotated ? ph : pw;
+  const H = rotated ? pw : ph;
 
   const tracks = await detectFaces(srcPath, { ...opts, durationSeconds: duration, onProgress: progress });
   if (tracks.length === 0) throw new Error("No faces found in this video — nothing to blur.");
@@ -311,8 +353,17 @@ export async function renderFaceBlur(srcPath: string, opts: BlurOptions = {}): P
         ? // Shrink then blow back up with no interpolation = classic mosaic. Cell size follows the
           // face so a small face doesn't turn into one flat square.
           `scale=${Math.max(2, Math.round(w / (strength * 2.2)))}:${Math.max(2, Math.round(h / (strength * 2.2)))}:flags=neighbor,scale=${w}:${h}:flags=neighbor`
-        : `avgblur=sizeX=${Math.round(strength * 3)}:sizeY=${Math.round(strength * 3)}`;
-    parts.push(`[f${i}]crop=${w}:${h}:'${X}':'${Y}',${cover}[b${i}]`);
+        : // boxblur twice, radius tied to the face size: a fixed radius barely touches a large face
+          // and obliterates the frame around a small one.
+          `boxblur=luma_radius=${Math.max(2, Math.round((w * strength) / 55))}:luma_power=2:chroma_radius=${Math.max(2, Math.round((w * strength) / 70))}:chroma_power=2`;
+    // Feathered ELLIPSE, not a bare rectangle: a hard-edged box screams "censored patch" and looks
+    // pasted on. The alpha is a function of position within the patch only — no time term — so it
+    // costs nothing per frame. d is the normalised elliptical distance (0 centre, 1 at the edge);
+    // alpha holds full inside ~0.72 and falls to nothing by the boundary.
+    const feather = `format=yuva420p,geq=lum='p(X,Y)':cb='p(X,Y)':cr='p(X,Y)':a='255*clip((1.0-hypot((X-${Math.round(
+      w / 2,
+    )})/${Math.max(1, Math.round(w / 2))}\\,(Y-${Math.round(h / 2)})/${Math.max(1, Math.round(h / 2))}))/0.28\\,0\\,1)'`;
+    parts.push(`[f${i}]crop=${w}:${h}:'${X}':'${Y}',${cover},${feather}[b${i}]`);
     // enable=between: outside the track's life the patch is not drawn at all, so a face that leaves
     // the shot doesn't leave a smear parked where it used to be.
     parts.push(`[${label}][b${i}]overlay=x='${X}':y='${Y}':enable='between(t,${t0},${t1})'[ov${i}]`);

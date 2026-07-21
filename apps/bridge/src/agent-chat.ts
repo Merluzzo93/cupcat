@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { SERVER_INSTRUCTIONS } from "./agent-instructions";
 import { type BridgeContext, executeTool } from "./executor";
-import { killAgentProcs, setAgentActive } from "./proc";
+import { killAgentProcs, resetAgentStop, setAgentActive } from "./proc";
 import { conversationSummaries } from "./chats";
 import { loadMemories } from "./memory";
 import { TOOL_DEFS } from "./mcp-tools";
@@ -353,6 +353,7 @@ export async function runChat(ctx: BridgeContext, req: ChatRequest, send: (event
   }
 
   stopRequested = false; // a stale stop from a previous run must not kill this one
+  resetAgentStop(); // ...nor may it kill the subprocesses this run is about to spawn
   const ac = new AbortController();
   currentAbort = ac;
   const memories = await loadMemories();

@@ -45,6 +45,11 @@ export function consumeKilled(tag: string): boolean {
 // auto_clips' many ffmpeg passes) are otherwise unreachable by killTagged and would run to
 // completion after the user pressed stop.
 let agentActive = false;
+// Sticky once a stop is requested. Killing only what happens to be running is not enough: a long
+// tool runs a SEQUENCE of subprocesses (transcribe = resample -> whisper -> silence; auto_clips
+// exports one ffmpeg per clip), so the next one would start right after the kill and the work would
+// carry on regardless. While this is set, anything the agent spawns dies immediately.
+let agentStopping = false;
 const agentProcs = new Set<Subprocess>();
 
 /** Toggle whether run() should register its spawns as agent-owned (call around tool execution). */
@@ -55,6 +60,7 @@ export function setAgentActive(on: boolean): void {
 
 /** Kill every subprocess spawned while the agent was active. Returns how many were killed. */
 export function killAgentProcs(): number {
+  agentStopping = true;
   let n = 0;
   for (const p of agentProcs) {
     try {
@@ -66,6 +72,11 @@ export function killAgentProcs(): number {
   }
   agentProcs.clear();
   return n;
+}
+
+/** Clear the armed stop. Called when a new chat run begins, so a previous stop can't kill it. */
+export function resetAgentStop(): void {
+  agentStopping = false;
 }
 
 export async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string>; tag?: string; stdin?: string } = {}): Promise<RunResult> {
@@ -90,7 +101,17 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; env
     // so a cancel that raced a completed export can't mislabel the new one as cancelled.
     killed.delete(opts.tag);
   }
-  if (agentActive) agentProcs.add(proc); // killable by a chat-stop (killAgentProcs)
+  if (agentActive) {
+    agentProcs.add(proc); // killable by a chat-stop (killAgentProcs)
+    // A stop that arrived while the previous step was finishing must also take out this one.
+    if (agentStopping) {
+      try {
+        proc.kill();
+      } catch {
+        /* already gone */
+      }
+    }
+  }
   try {
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),

@@ -162,7 +162,37 @@ describe("trackExpr", () => {
   });
 });
 
-describe("parseFrameBatch", () => {
+describe("parseFrameBatch — indexed replies", () => {
+  it("places each frame's faces by its own index", () => {
+    const got = parseFrameBatch('[{"i":0,"faces":[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}]},{"i":1,"faces":[]},{"i":2,"faces":[{"x":0.5,"y":0.2,"w":0.1,"h":0.1}]}]', 3);
+    expect(got.map((g) => g.length)).toEqual([1, 0, 1]);
+  });
+
+  it("re-aligns a reply that came back out of order", () => {
+    // The whole reason for the index. Trusting position would stamp one moment's face onto another
+    // moment's timestamp — a blurred face pasted where nobody is standing.
+    const got = parseFrameBatch('[{"i":2,"faces":[{"x":0.5,"y":0.2,"w":0.1,"h":0.1}]},{"i":0,"faces":[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}]}]', 3);
+    expect(got[0]).toHaveLength(1);
+    expect(got[1]).toHaveLength(0);
+    expect(got[2]).toHaveLength(1);
+    expect(got[0]![0]!.x).toBeCloseTo(0.1);
+    expect(got[2]![0]!.x).toBeCloseTo(0.5);
+  });
+
+  it("drops an out-of-range index instead of shifting everything", () => {
+    const got = parseFrameBatch('[{"i":9,"faces":[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}]},{"i":0,"faces":[{"x":0.3,"y":0.1,"w":0.2,"h":0.2}]}]', 2);
+    expect(got[0]).toHaveLength(1);
+    expect(got[0]![0]!.x).toBeCloseTo(0.3);
+    expect(got[1]).toHaveLength(0);
+  });
+
+  it("always returns exactly one entry per requested frame", () => {
+    expect(parseFrameBatch('[{"i":0,"faces":[]}]', 5)).toHaveLength(5);
+    expect(parseFrameBatch("nonsense", 4)).toHaveLength(4);
+  });
+});
+
+describe("parseFrameBatch — legacy array replies", () => {
   it("splits one array per image", () => {
     const got = parseFrameBatch('[[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}],[],[{"x":0.5,"y":0.1,"w":0.2,"h":0.2},{"x":0.8,"y":0.1,"w":0.1,"h":0.1}]]', 3);
     expect(got).toHaveLength(3);
