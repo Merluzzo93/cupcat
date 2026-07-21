@@ -713,6 +713,31 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "slip_clip",
+    description:
+      "SLIP EDIT: change WHICH part of the source a clip shows, without moving it on the timeline or changing its length. THE tool for 'the framing is right but the action starts too late', 'show a bit earlier/later in that take', 'shift the content inside the clip'. Positive deltaFrames reveals LATER source content, negative reveals earlier. Clamped to the media that exists — a partial slip is applied rather than refused. Undoable.",
+    inputSchema: obj(
+      {
+        clipId: { type: "string", description: "Clip to slip (from get_timeline)." },
+        deltaFrames: { type: "integer", description: "Timeline frames to slip. Positive = show later source content, negative = earlier." },
+      },
+      ["clipId", "deltaFrames"],
+    ),
+  },
+  {
+    name: "close_gaps",
+    description:
+      "CLOSE GAPS: pull clips left so the empty space between them disappears, keeping their order and lengths. THE tool for 'remove the gaps', 'close the holes', 'tighten the timeline' after deleting takes. Leading space before the first clip is kept unless fromStart is true (an intro pad is usually deliberate). Undoable.",
+    inputSchema: obj(
+      {
+        trackIndex: { type: "integer", description: "Only this track. Omit to close gaps on every track." },
+        minFrames: { type: "integer", description: "Ignore gaps shorter than this (default 2) — a sliver is usually deliberate spacing." },
+        fromStart: { type: "boolean", description: "Also close the space before the first clip (default false)." },
+      },
+      [],
+    ),
+  },
+  {
     name: "blur_faces",
     description:
       "PRIVACY / FACE BLUR: find every human face in a library video and render a copy with each one covered, following it as it moves. THE tool whenever the user wants faces blurred, hidden, censored, anonymised, pixelated, made unrecognisable, or asks to 'protect people's privacy' / 'hide bystanders' / 'GDPR' in footage. Faces are found by looking at sampled frames (works on profiles, background people and faces on screens), each face is tracked, and a face that leaves the shot stops being covered. Produces a NEW library video — the original is untouched. Cost scales with length: sample every 2-3s on long footage, every 0.5-1s when people move fast.",

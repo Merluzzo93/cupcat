@@ -1398,6 +1398,107 @@ export function trimClip(doc: EditorDocument, args: Args, source: EditSource = "
   return `Trimmed ${clipId} ${edge} edge by ${delta}f${ripple ? " (ripple)" : ""}`;
 }
 
+
+/**
+ * SLIP: change WHICH part of the source a clip shows, without moving it on the timeline or changing
+ * its length. Both trim offsets shift together — the classic NLE slip edit, used when the framing
+ * is right but the action is a beat early or late.
+ *
+ * The move is clamped to the media that actually exists: you cannot slip past the head of the
+ * source, and (when the asset's duration is known) not past its tail either. A partial slip is
+ * applied rather than refused, because "slip as far as it goes" is what an editor dragging the clip
+ * would get.
+ */
+export function slipClip(doc: EditorDocument, args: Args, source: EditSource = "agent"): string {
+  const clipId = reqStr(args, "clipId");
+  const delta = reqInt(args, "deltaFrames"); // + shows LATER source content, − shows earlier
+  const loc0 = doc.findClip(clipId);
+  if (!loc0) throw new CommandError(`Clip not found: ${clipId}`);
+  const c0 = doc.timeline.tracks[loc0.trackIndex]!.clips[loc0.clipIndex]!;
+  if (c0.mediaType === "text" || c0.mediaType === "adjustment") {
+    throw new CommandError("Slip needs a clip with source media — text and adjustment layers have none.");
+  }
+  let applied = 0;
+  doc.mutate("Slip Clip", source, () => {
+    const loc = doc.findClip(clipId)!;
+    const c = doc.timeline.tracks[loc.trackIndex]!.clips[loc.clipIndex]!;
+    const speed = c.speed > 0 ? c.speed : 1;
+    const want = Math.round(delta * speed); // timeline frames → source frames
+    // Head limit: trimStartFrame can't go below zero.
+    const minShift = -c.trimStartFrame;
+    // Tail limit: trimEndFrame is measured from the END of the source, so it can't go below zero
+    // either. Together these bound the slip without needing the asset's duration at all.
+    const maxShift = c.trimEndFrame;
+    const shift = Math.max(minShift, Math.min(maxShift, want));
+    c.trimStartFrame += shift;
+    c.trimEndFrame -= shift;
+    applied = Math.round(shift / speed);
+  });
+  if (applied === 0) return `No slip applied to ${clipId} — already at the ${delta > 0 ? "end" : "start"} of the source.`;
+  return `Slipped ${clipId} by ${applied}f (${applied > 0 ? "later" : "earlier"} source content); position and length unchanged`;
+}
+
+/**
+ * CLOSE GAPS: pull clips left so the empty space between them disappears, keeping their order and
+ * lengths. This is the "delete every gap" pass an editor does after ripple-deleting a few takes.
+ *
+ * Gaps shorter than `minFrames` are left alone — a one-frame sliver is usually deliberate spacing,
+ * not a hole. Leading space before the first clip is only closed when asked, since a deliberate
+ * offset at the head of a track (an intro pad) is common.
+ */
+export function closeGaps(doc: EditorDocument, args: Args, source: EditSource = "agent"): string {
+  const trackIndex = int(args, "trackIndex");
+  const minFrames = Math.max(1, int(args, "minFrames") ?? 2);
+  const fromStart = args.fromStart === true;
+  const tracks = doc.timeline.tracks;
+  if (trackIndex !== undefined && !tracks[trackIndex]) throw new CommandError(`Track not found: ${trackIndex}`);
+  const targets = trackIndex !== undefined ? [trackIndex] : tracks.map((_, i) => i);
+
+  let closed = 0;
+  let recovered = 0;
+  // Clips already moved as somebody's linked partner: a video clip and its audio share a
+  // linkGroupId, and closing a gap on the video track while leaving the audio behind would silently
+  // knock the take out of sync. Whichever track is processed first carries its partners along, and
+  // the partner is then skipped when its own track comes round.
+  const movedAsPartner = new Set<string>();
+  doc.mutate("Close Gaps", source, () => {
+    for (const ti of targets) {
+      const track = tracks[ti];
+      if (!track) continue;
+      const clips = [...track.clips].sort((a, b) => a.startFrame - b.startFrame);
+      // Where the next clip should butt up against. Starting at the first clip's own start keeps a
+      // deliberate head offset unless fromStart says otherwise.
+      let cursor = fromStart ? 0 : (clips[0]?.startFrame ?? 0);
+      for (const c of clips) {
+        if (movedAsPartner.has(c.id)) {
+          cursor = c.startFrame + c.durationFrames; // already positioned with its partner
+          continue;
+        }
+        const gap = c.startFrame - cursor;
+        if (gap >= minFrames) {
+          for (const m of doc.partnerMoves(c.id, cursor)) {
+            const p = doc.getClip(m.clipId);
+            if (p) {
+              p.startFrame = Math.max(0, m.toFrame);
+              movedAsPartner.add(p.id);
+            }
+          }
+          c.startFrame = cursor;
+          closed++;
+          recovered += gap;
+        } else if (gap > 0) {
+          cursor = c.startFrame; // sliver left as-is
+        }
+        cursor = c.startFrame + c.durationFrames;
+      }
+      track.clips.sort((a, b) => a.startFrame - b.startFrame);
+    }
+    for (const t of tracks) t.clips.sort((a, b) => a.startFrame - b.startFrame);
+  });
+  if (closed === 0) return "No gaps to close.";
+  return `Closed ${closed} gap(s), recovering ${recovered} frames${trackIndex !== undefined ? ` on track ${trackIndex}` : " across all tracks"}.`;
+}
+
 // ── duplicate_clips / paste_clips (clipboard) ─────────────────────────────────────
 
 function cloneClipData(src: Partial<Clip>, startFrame: number): Clip {
@@ -1897,6 +1998,8 @@ export const TIMELINE_COMMANDS: Record<string, TimelineCommand> = {
   apply_effect: applyEffect,
   set_track_properties: setTrackProperties,
   trim_clip: trimClip,
+  slip_clip: slipClip,
+  close_gaps: closeGaps,
   duplicate_clips: duplicateClips,
   paste_clips: pasteClips,
   add_transition: addTransition,

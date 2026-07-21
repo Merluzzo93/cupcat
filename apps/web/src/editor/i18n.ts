@@ -415,6 +415,8 @@ const EN = {
   "media.qualityCheck": "Check before publishing…",
   "media.qualityCheckHint": "Measure loudness, clipping, dead frames and flashing risk",
   "media.pickLut": "Choose a LUT file",
+  "toolbar.closeGaps": "Close gaps",
+  "tb.closeGapsHint": "Pull clips left so the empty space between them disappears, keeping order and lengths",
 } as const;
 
 export type Key = keyof typeof EN;
@@ -797,6 +799,8 @@ const IT: Partial<Record<Key, string>> = {
   "media.qualityCheck": "Verifica prima di pubblicare…",
   "media.qualityCheckHint": "Misura volume, distorsione, fotogrammi morti e rischio flash",
   "media.pickLut": "Scegli un file LUT",
+  "toolbar.closeGaps": "Chiudi i vuoti",
+  "tb.closeGapsHint": "Trascina le clip a sinistra per eliminare gli spazi vuoti, mantenendo ordine e durate",
 };
 
 const DICTS: Record<Lang, Partial<Record<Key, string>>> = { en: EN, it: IT };

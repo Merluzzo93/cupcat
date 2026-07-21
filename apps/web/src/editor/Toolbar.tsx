@@ -331,6 +331,14 @@ export function Toolbar() {
           {t("toolbar.merge")}
         </button>
         <button
+          onClick={() => void mcpCall("close_gaps", {})}
+          disabled={!project}
+          title={t("tb.closeGapsHint")}
+          className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
+        >
+          {t("toolbar.closeGaps")}
+        </button>
+        <button
           onClick={() => setShowBeatSync(true)}
           disabled={!project}
           title={t("tb.beatSyncHint")}
