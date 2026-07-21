@@ -3,7 +3,7 @@
 // the decisions that are easy to get subtly wrong and impossible to eyeball in a rendered frame.
 
 import { describe, expect, it } from "bun:test";
-import { buildTracks, iou, padBox, parseBoxes, parseFrameBatch, trackExpr } from "./faceblur";
+import { buildTracks, iou, padBox, parseBoxes, parseFrameBatch, supportsFilterScriptFromFile, trackExpr } from "./faceblur";
 
 describe("parseBoxes", () => {
   it("reads a clean array", () => {
@@ -188,5 +188,18 @@ describe("parseFrameBatch", () => {
 
   it("degrades to empties on unparseable text", () => {
     expect(parseFrameBatch("sorry, I cannot", 2)).toEqual([[], []]);
+  });
+});
+
+describe("supportsFilterScriptFromFile", () => {
+  it("probes the ffmpeg actually in use and caches the answer", async () => {
+    // Regression guard. The graph is passed via a file because the expressions are too long for a
+    // command line, but the spelling for that differs by version: `-filter_complex_script` was
+    // removed in ffmpeg 8, which is what CupCat bundles. Testing against an older ffmpeg on PATH
+    // hid the breakage — the shipped app failed with "Unrecognized option". Whatever this returns,
+    // it must be a definite boolean so a caller always picks one spelling or the other.
+    const a = await supportsFilterScriptFromFile();
+    expect(typeof a).toBe("boolean");
+    expect(await supportsFilterScriptFromFile()).toBe(a); // cached, no second probe
   });
 });

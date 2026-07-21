@@ -236,6 +236,24 @@ export async function detectFaces(srcPath: string, opts: DetectOptions): Promise
  * Produces nested if()s: before the first sample it holds the first value, after the last it holds
  * the last, and in between it interpolates — matching what the UI draws.
  */
+/**
+ * Does this ffmpeg accept `-/filter_complex <file>`? True on 7.x and later, false on older builds
+ * that only know `-filter_complex_script`. Probed once against the ACTUAL binary in use — the
+ * bundled sidecar and whatever happens to be on PATH are frequently different versions.
+ */
+let filterScriptStyle: boolean | null = null;
+export async function supportsFilterScriptFromFile(): Promise<boolean> {
+  if (filterScriptStyle !== null) return filterScriptStyle;
+  try {
+    // -h is enough: an unknown option is rejected during parsing, before any work happens.
+    const r = await run(FFMPEG_BIN, ["-hide_banner", "-/filter_complex", "-h"]);
+    filterScriptStyle = !/unrecognized option/i.test(r.stderr);
+  } catch {
+    filterScriptStyle = false;
+  }
+  return filterScriptStyle;
+}
+
 export interface BlurResult {
   file: string;
   faces: number;
@@ -307,15 +325,22 @@ export async function renderFaceBlur(srcPath: string, opts: BlurOptions = {}): P
   const out = join(exportsDir, `${base}-faces-blurred-${stamp}.mp4`);
   // The graph goes in a file: these expressions are long, and a command line long enough to hold
   // them is rejected ("Result too large").
+  //
+  // `-/filter_complex <file>` is ffmpeg's current way to read an option's value from a file. The
+  // older `-filter_complex_script` was deprecated in 7.x and REMOVED in 8 — which is the build
+  // CupCat bundles, so that spelling fails in the shipped app even though it still works against an
+  // older ffmpeg on PATH. Probe once and fall back, so either build works.
   const graphFile = join(exportsDir, `_faceblur_${stamp}.txt`);
   await Bun.write(graphFile, parts.join(";\n"));
+  const graphArgs = (await supportsFilterScriptFromFile())
+    ? ["-/filter_complex", graphFile]
+    : ["-filter_complex_script", graphFile];
 
   const args = [
     "-y",
     "-i",
     srcPath,
-    "-filter_complex_script",
-    graphFile,
+    ...graphArgs,
     "-map",
     `[${label}]`,
     ...(probe.hasAudio ? ["-map", "0:a?", "-c:a", "copy"] : ["-an"]),

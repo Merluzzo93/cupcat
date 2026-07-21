@@ -41,6 +41,19 @@ cd apps/desktop && npx @tauri-apps/cli@latest dev
 (Requires the web `dist` to exist — run `bun run build:web` first, or point `build.devUrl`
 at the Vite dev server.)
 
+## Testing against the RIGHT ffmpeg
+
+The bridge resolves ffmpeg from `CUPCAT_FFMPEG_BIN`, which `main.rs` points at the bundled sidecar.
+A dev shell without that variable falls back to whatever `ffmpeg` is on PATH — often a different,
+older build. That difference has shipped a real bug: `-filter_complex_script` works on ffmpeg 7 but
+was REMOVED in 8 (the bundled build), so face blur passed locally and failed in the installed app.
+
+When testing anything that shells out to ffmpeg, point the bridge at the sidecar:
+
+```sh
+CUPCAT_FFMPEG_BIN=apps/desktop/src-tauri/sidecars/ffmpeg.exe CUPCAT_FFPROBE_BIN=apps/desktop/src-tauri/sidecars/ffprobe.exe CUPCAT_PORT=19790 bun run bridge
+```
+
 ## Bundled sidecars
 
 `tauri build` bundles everything in `src-tauri/sidecars/` (gitignored) into the installer, and
