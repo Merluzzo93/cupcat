@@ -84,6 +84,15 @@ titles, a Ctrl+K command palette that falls back to the assistant.
 | `add_motion_graphic` / `make_transition` | Claude writes an animated HTML/CSS overlay → alpha video | Edge headless + VP9 |
 | `identify_speakers` | Speaker diarization | sherpa-onnx |
 | Semantic `search_media` | Find clips by name, generation prompt, or what's spoken | token index |
+| `blur_faces` | Find every face, follow it, render an anonymised copy | Claude vision + ffmpeg |
+| `stabilize_video` | Two-pass smoothing for handheld footage | ffmpeg vidstab |
+| `auto_color` | Measured exposure / white-balance fix, or match another shot | ffmpeg signalstats |
+| `apply_lut` | Grade with any `.cube` / `.3dl` LUT pack | ffmpeg lut3d |
+| `match_loudness` | Normalise to YouTube / TikTok / podcast / broadcast targets | ffmpeg loudnorm (2-pass) |
+| `repair_audio` / `enhance_audio` | Rebuild clipping & clicks; remove hiss and hum | ffmpeg adeclip · afftdn |
+| `duck_music` | Music drops under speech, returns in the gaps | ffmpeg sidechaincompress |
+| `auto_chapters` | Topic chapters + YouTube timestamps from the transcript | Whisper + Claude |
+| `quality_report` | Pre-publish check: loudness, clipping, dead frames, flash risk | ffmpeg (read-only) |
 
 **Generative media** — when you *want* to generate (never required, never metered by us): the
 agent calls **Higgsfield** through your own account (video, images, audio, upscaling, AI reframe,
