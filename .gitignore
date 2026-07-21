@@ -10,6 +10,7 @@ dist-bridge/
 
 # Tauri / Rust build
 apps/desktop/src-tauri/target/
+apps/faces/target/
 apps/desktop/src-tauri/gen/
 
 # Bundled binaries — large; built/fetched locally (see apps/desktop/README.md).

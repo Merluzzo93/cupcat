@@ -11,8 +11,8 @@
 // ends its track: blurring an empty region would smear the frame.
 
 import { join } from "node:path";
-import { mkdir } from "node:fs/promises";
-import { exportsDir, FFMPEG_BIN, FFPROBE_BIN } from "./config";
+import { mkdir, rm } from "node:fs/promises";
+import { exportsDir, FACES_BIN, FACES_MODEL, FFMPEG_BIN, FFPROBE_BIN } from "./config";
 import { frameToBase64, probeMedia, withTranscodeSlot } from "./ffmpeg";
 import { oneShotVision } from "./agent-chat";
 import { run } from "./proc";
@@ -200,6 +200,155 @@ export function buildTracks(frames: { t: number; boxes: { x: number; y: number; 
   return closed.filter((tr) => tr.pts.length >= 2);
 }
 
+
+// ── local detector ───────────────────────────────────────────────────────────
+
+/** One image's worth of detections from the sidecar. Pure — unit-tested. */
+export function parseSidecarLine(line: string): { file: string; faces: { x: number; y: number; w: number; h: number }[] } | null {
+  try {
+    const j = JSON.parse(line) as { file?: unknown; faces?: unknown };
+    if (typeof j.file !== "string" || !Array.isArray(j.faces)) return null;
+    const faces: { x: number; y: number; w: number; h: number }[] = [];
+    for (const f of j.faces) {
+      if (!f || typeof f !== "object") continue;
+      const o = f as Record<string, unknown>;
+      const n = (k: string) => (typeof o[k] === "number" && Number.isFinite(o[k]) ? (o[k] as number) : null);
+      const x = n("x"), y = n("y"), w = n("w"), h = n("h");
+      if (x === null || y === null || w === null || h === null) continue;
+      if (w <= 0.002 || h <= 0.002) continue;
+      faces.push({ x, y, w, h });
+    }
+    return { file: j.file, faces };
+  } catch {
+    return null;
+  }
+}
+
+/** Is the bundled local detector available? */
+export async function localDetectorReady(): Promise<boolean> {
+  if (!FACES_BIN || !FACES_MODEL) return false;
+  try {
+    return (await Bun.file(FACES_BIN).exists()) && (await Bun.file(FACES_MODEL).exists());
+  } catch {
+    return false;
+  }
+}
+
+/** The sidecar echoes the path it was handed; compare on one separator so Windows paths match. */
+const normalizePath = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+
+/** Run the detector over a set of already-extracted stills. One process for the whole batch. */
+async function detectInFiles(files: string[]): Promise<Map<string, { x: number; y: number; w: number; h: number }[]> | null> {
+  const det = await run(FACES_BIN, ["--model", FACES_MODEL, ...files]);
+  if (det.code !== 0) return null;
+  const byFile = new Map<string, { x: number; y: number; w: number; h: number }[]>();
+  for (const line of det.stdout.split(/\r?\n/)) {
+    const parsed = parseSidecarLine(line.trim());
+    if (parsed) byFile.set(normalizePath(parsed.file), parsed.faces);
+  }
+  return byFile.size > 0 ? byFile : null;
+}
+
+/**
+ * Where are the faces at these specific moments? Used by auto-reframe, which needs a handful of
+ * scattered instants rather than an even sweep. Boxes are unpadded fractions of the frame; null
+ * means the detector isn't available or didn't run, so the caller keeps its own heuristic.
+ */
+export async function detectFacesAt(
+  srcPath: string,
+  times: number[],
+): Promise<{ x: number; y: number; w: number; h: number }[][] | null> {
+  if (times.length === 0 || !(await localDetectorReady())) return null;
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const dir = join(exportsDir, `_faces_at_${stamp}`);
+  try {
+    await mkdir(dir, { recursive: true });
+    const files: string[] = [];
+    for (let i = 0; i < times.length; i++) {
+      const out = join(dir, `s${String(i).padStart(4, "0")}.jpg`);
+      const args = ["-y"];
+      if (times[i]! > 0.001) args.push("-ss", times[i]!.toFixed(3));
+      args.push("-i", srcPath, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", out);
+      const r = await run(FFMPEG_BIN, args);
+      files.push(r.code === 0 && (await Bun.file(out).exists()) ? out : "");
+    }
+    const present = files.filter(Boolean);
+    if (present.length === 0) return null;
+    const byFile = await detectInFiles(present);
+    if (!byFile) return null;
+    return files.map((f) => (f ? (byFile.get(normalizePath(f)) ?? []) : []));
+  } catch {
+    return null;
+  } finally {
+    void rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Detect with the bundled YuNet sidecar.
+ *
+ * A frame costs about a millisecond here instead of a second of API round trip, so this samples
+ * twice as often as the vision path: sparse samples with interpolation between them are where the
+ * blur used to drift off a moving face. Frames are extracted and detected in chunks so the temp
+ * folder stays small on a long video instead of holding thousands of stills at once.
+ *
+ * Returns null if anything at all goes wrong — the caller then falls back to the vision model.
+ */
+async function detectFacesLocal(
+  srcPath: string,
+  start: number,
+  end: number,
+  every: number,
+  pad: number,
+  progress: (t: string) => void,
+): Promise<{ t: number; boxes: { x: number; y: number; w: number; h: number }[] }[] | null> {
+  const step = Math.min(every, 0.5);
+  const CHUNK = 240; // frames per pass — keeps the temp folder around 10 MB
+  const total = Math.max(1, Math.ceil((end - start) / step));
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const frames: { t: number; boxes: { x: number; y: number; w: number; h: number }[] }[] = [];
+
+  let chunk = 0;
+  for (let t0 = start; t0 < end; t0 += CHUNK * step, chunk++) {
+    const span = Math.min(CHUNK * step, end - t0);
+    const dir = join(exportsDir, `_faces_${stamp}_${chunk}`);
+    try {
+      await mkdir(dir, { recursive: true });
+      // -ss before -i seeks by keyframe and then decodes to the exact point: one pass over this
+      // slice of the video, downscaled to 640 wide because the detector works at 640 anyway.
+      const ex = await run(FFMPEG_BIN, [
+        "-y", "-ss", t0.toFixed(3), "-i", srcPath, "-t", span.toFixed(3),
+        // A plain decimal, not "1/step": the fps option parses a rational, and a fractional
+        // denominator quietly gives the wrong cadence rather than an error.
+        "-vf", `fps=${(1 / step).toFixed(6)},scale=640:-2`, "-q:v", "3",
+        join(dir, "f%05d.jpg"),
+      ]);
+      if (ex.code !== 0) return null;
+
+      const files: { file: string; t: number }[] = [];
+      for (let i = 0; i < CHUNK; i++) {
+        const f = join(dir, `f${String(i + 1).padStart(5, "0")}.jpg`);
+        if (!(await Bun.file(f).exists())) break;
+        files.push({ file: f, t: Math.round((t0 + i * step) * 100) / 100 });
+      }
+      if (files.length === 0) continue;
+
+      const byFile = await detectInFiles(files.map((f) => f.file));
+      if (!byFile) return null;
+      for (const f of files) {
+        frames.push({ t: f.t, boxes: (byFile.get(normalizePath(f.file)) ?? []).map((b) => padBox(b, pad)) });
+      }
+      progress(`Looked at ${frames.length}/${total} frames…`);
+    } catch {
+      return null;
+    } finally {
+      void rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+  return frames.length > 0 ? frames : null;
+}
+
+
 /** Sample the video and return the faces found, already padded and grouped into tracks. */
 export async function detectFaces(srcPath: string, opts: DetectOptions): Promise<FaceTrack[]> {
   const every = Math.max(0.2, opts.everySeconds ?? 1);
@@ -218,6 +367,16 @@ export async function detectFaces(srcPath: string, opts: DetectOptions): Promise
   // so the wall clock is (frames / BATCH / POOL) round trips rather than one per frame.
   const groups: number[][] = [];
   for (let i = 0; i < times.length; i += BATCH) groups.push(times.slice(i, i + BATCH));
+
+  // Local detector first: same frames, about a thousand times faster, no API cost, and boxes on
+  // EVERY sampled instant rather than interpolated between sparse ones. The vision model stays as
+  // the fallback — it reads a scene the way a person does and catches faces on screens, in
+  // reflections and at odd angles that a specialised detector misses.
+  if (await localDetectorReady()) {
+    const local = await detectFacesLocal(srcPath, start, end, every, pad, progress);
+    if (local && local.some((f) => f.boxes.length > 0)) return buildTracks(local);
+    progress("Nothing found locally — looking again with the vision model…");
+  }
 
   const frames: { t: number; boxes: { x: number; y: number; w: number; h: number }[] }[] = [];
   const POOL = 6;

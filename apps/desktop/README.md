@@ -74,10 +74,25 @@ bun build --compile node_modules/@higgsfield/cli/bin/higgsfield.js \
 # whisper.cpp (whisper-cli.exe + ggml*.dll) — from github.com/ggml-org/whisper.cpp/releases (whisper-bin-x64.zip)
 # + model ggml-base.bin — from huggingface.co/ggerganov/whisper.cpp
 # unzip the Release/ DLLs + whisper-cli.exe and the model into src-tauri/sidecars/
+
+# face detection (apps/faces) — our own Rust sidecar, built from source
+cargo build --release --manifest-path apps/faces/Cargo.toml
+mkdir -p apps/desktop/src-tauri/sidecars/faces
+cp apps/faces/target/release/cupcat-faces.exe apps/desktop/src-tauri/sidecars/faces/
+# + the YuNet model (MIT, ~230 KB) from github.com/opencv/opencv_zoo
+#   → face_detection_yunet_2023mar.onnx, renamed to sidecars/faces/yunet.onnx
 ```
 
+The faces sidecar links against the ONNX Runtime that diarization already ships
+(`ORT_DYLIB_PATH` → `sidecars/diarize/onnxruntime.dll`), so it adds no second runtime — build it
+after `diarize/` is populated.
+
 Wired env (`main.rs`): `CUPCAT_FFMPEG_BIN`, `CUPCAT_FFPROBE_BIN`, `CUPCAT_HIGGSFIELD_BIN`,
-`CUPCAT_WHISPER_KIND=cpp`, `CUPCAT_WHISPER_BIN`, `CUPCAT_WHISPER_MODEL_FILE`.
+`CUPCAT_WHISPER_KIND=cpp`, `CUPCAT_WHISPER_BIN`, `CUPCAT_WHISPER_MODEL_FILE`,
+`CUPCAT_FACES_BIN`, `CUPCAT_FACES_MODEL`, `ORT_DYLIB_PATH`.
+
+Note that `resources` in `tauri.conf.json` lists every sidecar **subdirectory** by name: the
+`sidecars/*` glob matches files only, so a new subfolder that isn't listed silently ships empty.
 
 ## First run (Fase 7d)
 

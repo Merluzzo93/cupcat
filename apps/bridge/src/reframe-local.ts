@@ -1,6 +1,7 @@
 // Local, free auto-reframe (B2): reframe a 16:9 (or any) video to a vertical/other aspect WITHOUT
-// the cloud. A tiny grayscale frame per shot is analyzed for horizontal "interest" (gradient energy
-// centroid — where the detail/subject sits), the crop window is centered there per scene, and the
+// the cloud. Each shot is framed on the people in it when there are any — the bundled face detector
+// says where they stand — and otherwise on horizontal "interest" (gradient-energy centroid, i.e.
+// where the detail sits). The crop window is centred there per scene, and the
 // shots are re-encoded and concatenated. It's a virtual camera operator that picks framing per
 // shot. No ML model download, no credits, deterministic. The Higgsfield `reframe` tool remains the
 // AI content-aware alternative when the user wants it.
@@ -9,6 +10,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FFMPEG_BIN, mediaDir } from "./config";
+import { detectFacesAt } from "./faceblur";
 import { analyzeVideo, probeMedia } from "./ffmpeg";
 import { run } from "./proc";
 
@@ -65,6 +67,41 @@ async function interestCenterX(src: string, atSeconds: number, tmp: string): Pro
   return Math.min(1, Math.max(0, weighted / sum / SAMPLE_W));
 }
 
+/**
+ * Horizontal centre of the faces in a frame, or null if nobody is there.
+ *
+ * When there are people in shot this beats the gradient centroid outright: gradient energy is drawn
+ * to whatever has the most detail — a bookshelf, a window, on-screen text — so a talking head in
+ * front of a busy wall gets framed on the wall. Weighting by face area keeps the camera on the
+ * person nearest the lens when a group is spread across the frame.
+ */
+export function faceCenterX(boxes: { x: number; y: number; w: number; h: number }[]): number | null {
+  return faceCenter(boxes, (b) => b.x + b.w / 2);
+}
+
+/** Same, vertically — used when it's the height being cropped, so nobody gets their head cut off. */
+export function faceCenterY(boxes: { x: number; y: number; w: number; h: number }[]): number | null {
+  // Aim a little below the faces: a head sitting dead-centre looks like a mugshot, whereas leaving
+  // room under the chin gives the body some frame, which is how a person would hold the camera.
+  const c = faceCenter(boxes, (b) => b.y + b.h / 2);
+  return c === null ? null : Math.min(1, c + 0.12);
+}
+
+function faceCenter(
+  boxes: { x: number; y: number; w: number; h: number }[],
+  pick: (b: { x: number; y: number; w: number; h: number }) => number,
+): number | null {
+  let area = 0;
+  let weighted = 0;
+  for (const b of boxes) {
+    const a = b.w * b.h;
+    if (a <= 0) continue;
+    area += a;
+    weighted += a * pick(b);
+  }
+  return area > 0 ? Math.min(1, Math.max(0, weighted / area)) : null;
+}
+
 /** Split a duration into shots on scene changes, merging shots shorter than minShot seconds. */
 function buildShots(sceneChanges: number[], dur: number, minShot = 1.2): [number, number][] {
   const cuts = [...new Set(sceneChanges.filter((t) => t > minShot && t < dur - 0.3))].sort((a, b) => a - b);
@@ -108,6 +145,11 @@ export async function reframeLocal(src: string, targetAspect: string, opts: { sm
     const { sceneChanges } = await analyzeVideo(src).catch(() => ({ sceneChanges: [] as number[] }));
     const shots = buildShots(sceneChanges, dur);
 
+    // Where the people are, one look per shot. Faces are what a human operator frames on, so they
+    // win when present; the gradient centroid still handles landscape, product and b-roll shots.
+    const midpoints = shots.map(([s, e]) => s + (e - s) / 2);
+    const faceHits = await detectFacesAt(src, midpoints).catch(() => null);
+
     // Interest center per shot (sampled at the shot midpoint; a second sample averaged in for long shots).
     const segFiles: string[] = [];
     const smooth = opts.smooth !== false;
@@ -115,20 +157,28 @@ export async function reframeLocal(src: string, targetAspect: string, opts: { sm
     for (let i = 0; i < shots.length; i++) {
       const [s, e] = shots[i];
       const mid = s + (e - s) / 2;
-      let center = await interestCenterX(src, mid, tmp);
-      if (e - s > 4) {
-        const c2 = await interestCenterX(src, s + (e - s) * 0.25, tmp);
-        center = (center + c2) / 2;
+      let center = faceCenterX(faceHits?.[i] ?? []);
+      if (center === null) {
+        center = await interestCenterX(src, mid, tmp);
+        if (e - s > 4) {
+          const c2 = await interestCenterX(src, s + (e - s) * 0.25, tmp);
+          center = (center + c2) / 2;
+        }
       }
-      // Light temporal smoothing so framing doesn't snap wildly between adjacent shots.
-      if (smooth) center = prevCenter * 0.35 + center * 0.65;
+      // Light temporal smoothing so framing doesn't snap wildly between adjacent shots. The first
+      // shot has nothing to smooth against, and blending it toward the middle just drags the
+      // opening frame off its subject — so it keeps the centre it measured.
+      if (smooth && i > 0) center = prevCenter * 0.35 + center * 0.65;
       prevCenter = center;
 
       // Convert the interest center to a valid top-left crop origin, clamped in-bounds.
       let cx = Math.round(center * W - cropW / 2);
       cx = Math.max(0, Math.min(W - cropW, cx));
       let cy = 0;
-      if (vertical) cy = Math.max(0, Math.min(H - cropH, Math.round(H / 2 - cropH / 2)));
+      if (vertical) {
+        const fy = faceCenterY(faceHits?.[i] ?? []) ?? 0.5;
+        cy = Math.max(0, Math.min(H - cropH, Math.round(fy * H - cropH / 2)));
+      }
       cx -= cx % 2;
       cy -= cy % 2;
 

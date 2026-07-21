@@ -84,7 +84,7 @@ titles, a Ctrl+K command palette that falls back to the assistant.
 | `add_motion_graphic` / `make_transition` | Claude writes an animated HTML/CSS overlay → alpha video | Edge headless + VP9 |
 | `identify_speakers` | Speaker diarization | sherpa-onnx |
 | Semantic `search_media` | Find clips by name, generation prompt, or what's spoken | token index |
-| `blur_faces` | Find every face, follow it, render an anonymised copy | Claude vision + ffmpeg |
+| `blur_faces` | Find every face, follow it, render an anonymised copy | YuNet (ONNX) + ffmpeg |
 | `stabilize_video` | Two-pass smoothing for handheld footage | ffmpeg vidstab |
 | `auto_color` | Measured exposure / white-balance fix, or match another shot | ffmpeg signalstats |
 | `apply_lut` | Grade with any `.cube` / `.3dl` LUT pack | ffmpeg lut3d |
@@ -111,7 +111,7 @@ hands you the Export button; it never renders on your behalf.
 
 **Just want to use it:** download the installer from **[cupcat.meetaly.agency](https://cupcat.meetaly.agency)**
 or the [**latest release**](../../releases/latest) — `CupCat_<version>_x64-setup.exe` — and run it. It's a
-self-contained Windows app; every local engine (ffmpeg, Whisper, Piper, sherpa-onnx) is bundled.
+self-contained Windows app; every local engine (ffmpeg, Whisper, Piper, sherpa-onnx, YuNet) is bundled.
 No preinstalls, no Python, no credits. CupCat checks for new versions on launch and offers a one-click download.
 
 To use the in-app assistant or MCP, sign in to **Claude Code** on the same machine. To generate
@@ -122,7 +122,7 @@ media, sign in to **Higgsfield** (`higgsfield auth login`).
 ```
 Claude Code / Desktop ──MCP (http 127.0.0.1:19789/mcp)──▶  CupCat bridge (bun, compiled)
 In-app chat ───────────────────────────────────────────┤   ├─ ~100 timeline + media tools
-                                                        │   ├─ local AI: Whisper · Piper · sherpa-onnx · ffmpeg
+                                                        │   ├─ local AI: Whisper · Piper · sherpa-onnx · YuNet · ffmpeg
                                                         │   └─ Higgsfield CLI (generate / upscale, your account)
                                                         │ WebSocket (live state)
                                                         ▼

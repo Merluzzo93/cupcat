@@ -3,7 +3,7 @@
 // the decisions that are easy to get subtly wrong and impossible to eyeball in a rendered frame.
 
 import { describe, expect, it } from "bun:test";
-import { buildTracks, iou, padBox, parseBoxes, parseFrameBatch, supportsFilterScriptFromFile, trackExpr } from "./faceblur";
+import { buildTracks, iou, padBox, parseBoxes, parseFrameBatch, parseSidecarLine, supportsFilterScriptFromFile, trackExpr } from "./faceblur";
 
 describe("parseBoxes", () => {
   it("reads a clean array", () => {
@@ -231,5 +231,51 @@ describe("supportsFilterScriptFromFile", () => {
     const a = await supportsFilterScriptFromFile();
     expect(typeof a).toBe("boolean");
     expect(await supportsFilterScriptFromFile()).toBe(a); // cached, no second probe
+  });
+});
+
+// The local face detector is a separate process, so everything it says arrives as text. These tests
+// pin the reading of that text: a malformed line must never take down a blur job, and a box that
+// would be meaningless must never become a blur patch on someone's video.
+
+describe("parseSidecarLine", () => {
+  it("reads a detection into fractional boxes", () => {
+    const r = parseSidecarLine('{"file":"a.jpg","w":720,"h":1280,"faces":[{"x":0.37,"y":0.02,"w":0.16,"h":0.11,"score":0.93}]}');
+    expect(r?.file).toBe("a.jpg");
+    expect(r?.faces).toEqual([{ x: 0.37, y: 0.02, w: 0.16, h: 0.11 }]);
+  });
+
+  it("reads a frame with no face as an empty list, not as a failure", () => {
+    // The distinction matters: null means "the detector broke, fall back to vision", while an empty
+    // list means "there is genuinely nobody here" and the frame must be left untouched.
+    expect(parseSidecarLine('{"file":"a.jpg","w":720,"h":1280,"faces":[]}')).toEqual({ file: "a.jpg", faces: [] });
+  });
+
+  it("keeps every face when several are in shot", () => {
+    const r = parseSidecarLine(
+      '{"file":"a.jpg","faces":[{"x":0.1,"y":0.1,"w":0.1,"h":0.1,"score":0.9},{"x":0.6,"y":0.1,"w":0.1,"h":0.1,"score":0.8}]}',
+    );
+    expect(r?.faces).toHaveLength(2);
+  });
+
+  it("survives Windows paths, which are full of backslashes", () => {
+    const r = parseSidecarLine('{"file":"D:\\\\exports\\\\_faces\\\\f00001.jpg","faces":[]}');
+    expect(r?.file).toBe("D:\\exports\\_faces\\f00001.jpg");
+  });
+
+  it("returns null on anything that isn't a detection line", () => {
+    for (const bad of ["", "not json", "{}", '{"file":"a.jpg"}', '{"faces":[]}', '{"file":42,"faces":[]}']) {
+      expect(parseSidecarLine(bad)).toBeNull();
+    }
+  });
+
+  it("drops boxes with missing or non-numeric coordinates rather than blurring at NaN", () => {
+    const r = parseSidecarLine('{"file":"a.jpg","faces":[{"x":0.1,"y":0.1,"w":0.1},{"x":"a","y":0.1,"w":0.1,"h":0.1},{"x":0.1,"y":0.1,"w":0.1,"h":0.1}]}');
+    expect(r?.faces).toEqual([{ x: 0.1, y: 0.1, w: 0.1, h: 0.1 }]);
+  });
+
+  it("drops degenerate boxes — a sub-pixel patch is noise, not a face", () => {
+    const r = parseSidecarLine('{"file":"a.jpg","faces":[{"x":0.5,"y":0.5,"w":0.001,"h":0.001,"score":0.7}]}');
+    expect(r?.faces).toEqual([]);
   });
 });

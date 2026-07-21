@@ -1,0 +1,18 @@
+[package]
+name = "cupcat-faces"
+version = "0.1.0"
+edition = "2021"
+description = "Local face detection sidecar for CupCat (YuNet on ONNX Runtime)"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+# load-dynamic: the runtime is resolved at start from ORT_DYLIB_PATH, so this binds to the
+# onnxruntime.dll CupCat ALREADY ships for speech diarization and stem separation — no second copy.
+ort = { version = "=2.0.0-rc.10", features = ["load-dynamic"], default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

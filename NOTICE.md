@@ -33,6 +33,10 @@ The Windows installer ships these third-party tools as sidecars; each keeps its 
 - **yt-dlp** — Unlicense (public domain); used for URL imports the user requests. (github.com/yt-dlp/yt-dlp)
 - **sherpa-onnx** (`sherpa-onnx-offline-speaker-diarization` + onnxruntime) — Apache-2.0, © k2-fsa / Xiaomi Corp. Used for on-device speaker diarization. (github.com/k2-fsa/sherpa-onnx)
 - **pyannote segmentation-3.0** speaker segmentation model (ONNX export) — MIT, © pyannote (huggingface.co/pyannote/segmentation-3.0); **3D-Speaker ERes2Net** speaker embedding model — Apache-2.0, © Alibaba 3D-Speaker. Both redistributed via sherpa-onnx.
+- **YuNet** face detection model (`face_detection_yunet_2023mar.onnx`) — MIT, © Shiqi Yu and contributors,
+  redistributed via OpenCV Zoo (github.com/opencv/opencv_zoo). Run on-device by `cupcat-faces`, our own
+  sidecar (`apps/faces`, GPL-3.0-or-later), which links the ONNX Runtime already bundled above.
+- **ort** Rust bindings for ONNX Runtime — MIT/Apache-2.0, © pyke.io; **image** crate — MIT, © image-rs.
 - **Higgsfield CLI** — © Higgsfield; used under the user's own Higgsfield account.
 
 ## Bundled web assets

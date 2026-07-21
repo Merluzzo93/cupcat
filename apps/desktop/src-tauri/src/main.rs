@@ -57,6 +57,12 @@ fn main() {
                     p("separate/sherpa-onnx-offline-source-separation.exe"),
                 )
                 .env("CUPCAT_SEPARATE_DIR", p("separate"))
+                // Local face detection (YuNet on ONNX Runtime). It links against the onnxruntime
+                // that diarization already ships rather than carrying a second copy, so the whole
+                // feature adds one 230 KB model to the installer.
+                .env("CUPCAT_FACES_BIN", p("faces/cupcat-faces.exe"))
+                .env("CUPCAT_FACES_MODEL", p("faces/yunet.onnx"))
+                .env("ORT_DYLIB_PATH", p("diarize/onnxruntime.dll"))
                 .env("CUPCAT_VERSION", app.package_info().version.to_string());
             let (mut rx, child) = sidecar.spawn()?;
             app.manage(BridgeProcess(Mutex::new(Some(child))));
