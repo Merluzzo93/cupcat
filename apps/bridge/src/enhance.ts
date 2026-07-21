@@ -184,3 +184,147 @@ export async function duckMusic(
   if (r.code !== 0 || !(await Bun.file(out).exists())) throw new Error(`Ducking failed: ${r.stderr.slice(-300)}`);
   return { file: out, note: `music ducked under the voice (amount ${amount}/10)` };
 }
+
+// ── loudness ────────────────────────────────────────────────────────────────
+
+/** Where the audio is going. Each platform normalises to its own target and turns anything louder
+ * DOWN, so mastering above the target only costs dynamic range — it never plays louder. */
+export const LOUDNESS_TARGETS = {
+  youtube: { i: -14, tp: -1, lra: 11, label: "YouTube / Spotify / Apple Music" },
+  tiktok: { i: -14, tp: -1, lra: 9, label: "TikTok / Reels / Shorts" },
+  podcast: { i: -16, tp: -1, lra: 11, label: "Podcast (Apple/Spotify spoken word)" },
+  broadcast: { i: -23, tp: -2, lra: 7, label: "Broadcast EBU R128" },
+  cinema: { i: -27, tp: -2, lra: 20, label: "Cinema / wide dynamics" },
+} as const;
+
+export type LoudnessTarget = keyof typeof LOUDNESS_TARGETS;
+
+export interface LoudnessMeasurement {
+  i: number; // integrated loudness, LUFS
+  tp: number; // true peak, dBTP
+  lra: number; // loudness range
+  thresh: number;
+  offset: number;
+}
+
+/** Parse loudnorm's print_format=json block out of ffmpeg's stderr. Pure — unit-tested. */
+export function parseLoudnorm(stderr: string): LoudnessMeasurement | null {
+  const start = stderr.lastIndexOf("{");
+  const end = stderr.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const j = JSON.parse(stderr.slice(start, end + 1)) as Record<string, string>;
+    const num = (k: string) => {
+      const v = Number.parseFloat(j[k] ?? "");
+      return Number.isFinite(v) ? v : null;
+    };
+    const i = num("input_i");
+    const tp = num("input_tp");
+    const lra = num("input_lra");
+    const thresh = num("input_thresh");
+    const offset = num("target_offset");
+    if (i === null || tp === null || lra === null || thresh === null) return null;
+    return { i, tp, lra, thresh, offset: offset ?? 0 };
+  } catch {
+    return null;
+  }
+}
+
+/** Measure a file's loudness without rendering anything. */
+export async function measureLoudness(src: string, target: LoudnessTarget = "youtube"): Promise<LoudnessMeasurement | null> {
+  const t = LOUDNESS_TARGETS[target];
+  const r = await run(FFMPEG_BIN, [
+    "-hide_banner", "-i", src, "-af", `loudnorm=I=${t.i}:TP=${t.tp}:LRA=${t.lra}:print_format=json`, "-f", "null", "-",
+  ]);
+  return parseLoudnorm(r.stderr);
+}
+
+/**
+ * Normalise to a platform's loudness target using loudnorm's TWO-PASS mode: the first pass measures,
+ * the second applies with those measurements fed back in. Single-pass loudnorm is a live estimator
+ * and drifts on material whose level changes; two-pass lands on the target.
+ */
+export async function matchLoudness(
+  src: string,
+  opts: { target?: LoudnessTarget; onProgress?: (t: string) => void } = {},
+): Promise<EnhanceResult & { before: number; after: number }> {
+  const progress = opts.onProgress ?? (() => {});
+  const key = (opts.target ?? "youtube") as LoudnessTarget;
+  const t = LOUDNESS_TARGETS[key] ?? LOUDNESS_TARGETS.youtube;
+  const probe = await probeMedia(src);
+  if (!probe.hasAudio) throw new Error("This media has no audio track to normalise.");
+
+  progress("Measuring loudness…");
+  const m = await measureLoudness(src, key);
+  if (!m) throw new Error("Couldn't measure this file's loudness.");
+
+  progress(`Normalising to ${t.i} LUFS (${t.label})…`);
+  const out = await outPath(src, `loudness-${key}`);
+  const isVideo = (probe.width ?? 0) > 0;
+  const af =
+    `loudnorm=I=${t.i}:TP=${t.tp}:LRA=${t.lra}` +
+    `:measured_I=${m.i}:measured_TP=${m.tp}:measured_LRA=${m.lra}:measured_thresh=${m.thresh}` +
+    `:offset=${m.offset}:linear=true:print_format=summary`;
+  const r = await withTranscodeSlot(() =>
+    run(FFMPEG_BIN, [
+      "-y", "-i", src, "-af", af,
+      ...(isVideo ? ["-c:v", "copy"] : []), // picture untouched
+      "-c:a", "aac", "-b:a", "192k", "-ar", "48000", out,
+    ]),
+  );
+  if (r.code !== 0 || !(await Bun.file(out).exists())) throw new Error(`Loudness match failed: ${r.stderr.slice(-300)}`);
+  const after = await measureLoudness(out, key);
+  return {
+    file: out,
+    note: `${m.i.toFixed(1)} → ${(after?.i ?? t.i).toFixed(1)} LUFS for ${t.label}`,
+    before: m.i,
+    after: after?.i ?? t.i,
+  };
+}
+
+// ── repair ──────────────────────────────────────────────────────────────────
+
+/**
+ * Repair a damaged recording, as opposed to merely cleaning a good one:
+ *  - declick  — impulsive clicks/crackle from bad cables, edits or dropouts
+ *  - declip   — rebuilds samples that were recorded past 0 dBFS and got flattened
+ *  - deesser  — tames harsh sibilance from a close mic
+ * Each stage is optional because applying one that isn't needed only costs quality.
+ */
+export async function repairAudio(
+  src: string,
+  opts: { declick?: boolean; declip?: boolean; deesser?: boolean; onProgress?: (t: string) => void } = {},
+): Promise<EnhanceResult> {
+  const progress = opts.onProgress ?? (() => {});
+  const probe = await probeMedia(src);
+  if (!probe.hasAudio) throw new Error("This media has no audio track to repair.");
+
+  const stages: string[] = [];
+  const done: string[] = [];
+  if (opts.declip !== false) {
+    stages.push("adeclip=window=55:overlap=75");
+    done.push("clipping rebuilt");
+  }
+  if (opts.declick !== false) {
+    stages.push("adeclick=window=55:overlap=75");
+    done.push("clicks removed");
+  }
+  if (opts.deesser !== false) {
+    stages.push("deesser=i=0.4:m=0.5:f=0.5");
+    done.push("sibilance tamed");
+  }
+  if (stages.length === 0) throw new Error("Nothing to repair — every stage was disabled.");
+
+  progress("Repairing the recording…");
+  const out = await outPath(src, "repaired-audio");
+  const isVideo = (probe.width ?? 0) > 0;
+  const r = await withTranscodeSlot(() =>
+    run(FFMPEG_BIN, [
+      "-y", "-i", src, "-af", stages.join(","),
+      ...(isVideo ? ["-c:v", "copy"] : []),
+      "-c:a", "aac", "-b:a", "192k", "-ar", "48000", out,
+    ]),
+  );
+  if (r.code !== 0 || !(await Bun.file(out).exists())) throw new Error(`Audio repair failed: ${r.stderr.slice(-300)}`);
+  return { file: out, note: done.join(", ") };
+}

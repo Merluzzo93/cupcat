@@ -579,6 +579,70 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "match_loudness",
+    description:
+      "PLATFORM LOUDNESS: normalise a library asset to the loudness a platform expects, using a two-pass measure-then-apply so it lands on target instead of drifting. THE tool for 'too quiet/too loud for YouTube', 'normalise the audio', 'match broadcast levels', 'make it as loud as other videos'. Targets: youtube (-14 LUFS, also Spotify/Apple), tiktok (-14, tighter range), podcast (-16), broadcast (-23 EBU R128), cinema (-27). Picture is stream-copied. Produces a NEW library asset.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library asset id (or exact name)." },
+        target: { type: "string", enum: ["youtube", "tiktok", "podcast", "broadcast", "cinema"], description: "Where it's going (default youtube)." },
+      },
+      ["media"],
+    ),
+  },
+  {
+    name: "repair_audio",
+    description:
+      "REPAIR DAMAGED AUDIO (not just clean it): rebuild samples that clipped past full scale, remove impulsive clicks/crackle from bad cables or edits, and tame harsh sibilance. THE tool for 'the audio is distorted/crackly/clipping', 'harsh S sounds', 'the recording is damaged'. Different from enhance_audio, which removes steady background noise from an otherwise good recording — use that for hiss/hum, this for damage. Produces a NEW library asset.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library asset id (or exact name)." },
+        declip: { type: "boolean", description: "Rebuild clipped samples (default true)." },
+        declick: { type: "boolean", description: "Remove clicks and crackle (default true)." },
+        deesser: { type: "boolean", description: "Tame harsh sibilance (default true)." },
+      },
+      ["media"],
+    ),
+  },
+  {
+    name: "auto_color",
+    description:
+      "AUTO COLOUR CORRECTION / SHOT MATCHING: measure a clip's exposure, contrast and white balance from its own frames and correct them — or pass `reference` to move it toward ANOTHER clip's look so two cameras cut together. THE tool for 'the colours look off', 'too blue/orange', 'too dark/flat', 'fix the white balance', 'make these two shots match'. Measurement-driven and deliberately conservative. Produces a NEW library video.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library video asset id (or exact name) to correct." },
+        reference: { type: "string", description: "Optional library video whose look to match. Omit to balance the clip on its own." },
+        strength: { type: "number", description: "0-1.5 how far to push the correction (default 1)." },
+      },
+      ["media"],
+    ),
+  },
+  {
+    name: "apply_lut",
+    description:
+      "APPLY A LUT: grade a clip with a .cube / .3dl look-up table — the format every LUT pack ships. Use for 'apply this LUT', 'use my film look', 'grade it with this .cube'. Intensity below 1 blends the graded picture back over the original. Produces a NEW library video.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library video asset id (or exact name)." },
+        lutPath: { type: "string", description: "Absolute path to a .cube or .3dl file." },
+        intensity: { type: "number", description: "0-1 blend against the original (default 1 = full)." },
+      },
+      ["media", "lutPath"],
+    ),
+  },
+  {
+    name: "quality_report",
+    description:
+      "PRE-PUBLISH CHECK: measure a library asset and report what would embarrass the user after upload — loudness against the platform target, clipped or too-quiet audio, black frames at the head/tail, frozen picture, and flashing that could trigger photosensitive seizures. THE tool for 'is this ready to publish', 'check this before I upload', 'anything wrong with this export'. Read-only: nothing is rendered or changed. Report the findings verbatim and offer the matching fix tool for each one.",
+    inputSchema: obj(
+      {
+        media: { type: "string", description: "Library asset id (or exact name)." },
+        target: { type: "string", enum: ["youtube", "tiktok", "podcast", "broadcast", "cinema"], description: "Which platform's loudness to judge against (default youtube)." },
+      },
+      ["media"],
+    ),
+  },
+  {
     name: "auto_chapters",
     description:
       "CHAPTERS FROM SPEECH: split a library video into chapters by topic and return a ready-to-paste YouTube chapter list, optionally dropping a timeline marker at each one. THE tool for 'add chapters', 'YouTube timestamps', 'break this into sections', 'what are the topics'. Uses the cached transcript, so on a video already transcribed (captions, clipping, filler removal) it is nearly instant and costs one short model call.",

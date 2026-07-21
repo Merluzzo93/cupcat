@@ -32,6 +32,9 @@ import { autoClips } from "./clips";
 import { renderFaceBlur } from "./faceblur";
 import { deflickerVideo, denoiseVideo, duckMusic, enhanceAudio, stabilizeVideo } from "./enhance";
 import { chapterTimestamp, detectChapters } from "./chapters";
+import { matchLoudness, repairAudio, type LoudnessTarget } from "./enhance";
+import { applyLut, autoColor } from "./grade";
+import { formatQcReport, runQualityCheck } from "./qc";
 import { autoRoughCut } from "./roughcut";
 import { reframeLocal } from "./reframe-local";
 import { applyTemplate, listTemplates, saveTemplate } from "./templates";
@@ -1606,6 +1609,62 @@ async function autoRoughCutTool(ctx: BridgeContext, args: Args): Promise<ToolOut
   }
 }
 
+/** Auto colour, optionally matching another clip's look. Two assets, so it needs its own shape. */
+async function autoColorTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const find = (ref?: string) => (ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null);
+  const a = find(strOpt(args.media));
+  if (!a?.url) return fail("Pass a library VIDEO asset (id or exact name) in `media`.");
+  if (a.type !== "video") return fail("auto_color needs a VIDEO asset from the library.");
+  const refAsset = find(strOpt(args.reference));
+  if (strOpt(args.reference) && !refAsset?.url) return fail(`Reference asset not found: ${strOpt(args.reference)}`);
+  try {
+    const res = await autoColor(a.url, {
+      durationSeconds: a.durationSeconds ?? 0,
+      strength: numOpt(args.strength),
+      referencePath: refAsset?.url,
+      referenceDuration: refAsset?.durationSeconds ?? 0,
+      onProgress: (text) => emitProgress("auto_color", text),
+    });
+    const label = refAsset ? `matched to ${refAsset.name}` : "auto colour";
+    const id = await registerRenderedAsset(ctx, res.file, `${a.name} (${label})`);
+    return ok(`Rendered "${a.name} (${label})" — ${res.note} — and added it to the library.\nFile: ${res.file}\nAsset: ${id}`);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Grade with a .cube LUT from disk. */
+async function applyLutTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.media);
+  const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
+  if (!a?.url) return fail("Pass a library VIDEO asset (id or exact name) in `media`.");
+  const lut = strOpt(args.lutPath);
+  if (!lut) return fail("Pass the absolute path to a .cube or .3dl file in `lutPath`.");
+  try {
+    const res = await applyLut(a.url, lut, { intensity: numOpt(args.intensity), onProgress: (t) => emitProgress("apply_lut", t) });
+    const id = await registerRenderedAsset(ctx, res.file, `${a.name} (LUT)`);
+    return ok(`Rendered "${a.name} (LUT)" — ${res.note} — and added it to the library.\nFile: ${res.file}\nAsset: ${id}`);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Read-only pre-publish check. */
+async function qualityReportTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.media);
+  const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
+  if (!a?.url) return fail("Pass a library asset (id or exact name) in `media`.");
+  try {
+    const report = await runQualityCheck(a.url, {
+      target: strOpt(args.target) as LoudnessTarget | undefined,
+      onProgress: (t) => emitProgress("quality_report", t),
+    });
+    return ok(`Pre-publish check — ${a.name}\n\n${formatQcReport(report)}`);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** Chapters from what's said: markers on the timeline + a description block ready to paste. */
 async function autoChaptersTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const ref = strOpt(args.media);
@@ -2399,6 +2458,25 @@ export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Arg
         return await analyzeFootageTool(ctx.doc, args);
       case "capture_frame":
         return await captureFrame(ctx, args);
+      case "match_loudness":
+        return await enhanceTool(ctx, args, "loudness matched", (src, prog) =>
+          matchLoudness(src, { target: strOpt(args.target) as LoudnessTarget | undefined, onProgress: prog }),
+        );
+      case "repair_audio":
+        return await enhanceTool(ctx, args, "repaired audio", (src, prog) =>
+          repairAudio(src, {
+            declip: args.declip !== false,
+            declick: args.declick !== false,
+            deesser: args.deesser !== false,
+            onProgress: prog,
+          }),
+        );
+      case "auto_color":
+        return await autoColorTool(ctx, args);
+      case "apply_lut":
+        return await applyLutTool(ctx, args);
+      case "quality_report":
+        return await qualityReportTool(ctx, args);
       case "auto_chapters":
         return await autoChaptersTool(ctx, args);
       case "stabilize_video":

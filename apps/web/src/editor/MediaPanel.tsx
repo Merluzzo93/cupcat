@@ -1,7 +1,7 @@
 import type { MediaAsset, MediaFolder } from "@cupcat/editor-core";
 import { t } from "./i18n";
 import { useEffect, useRef, useState } from "react";
-import { importFiles, mcpCall, mediaUrl, ui, useEditor } from "./store";
+import { importFiles, mcpCall, mediaUrl, pickFile, ui, useEditor } from "./store";
 
 /** Library video thumbnail with a spinner while the playable proxy loads — heavy or non-mp4 sources
  * (a 100 MB .mov) take a moment on first view, and a silent black tile reads as "broken".
@@ -250,6 +250,16 @@ export function MediaPanel() {
     void mcpCall(tool, { media: id });
   };
 
+  // The LUT lives on disk, not in the library, so it gets the native file picker.
+  const applyLutFromCtx = () => {
+    const id = ctxMenu?.id;
+    setCtxMenu(null);
+    if (!id) return;
+    void pickFile(t("media.pickLut"), ["cube", "3dl"]).then((lutPath) => {
+      if (lutPath) void mcpCall("apply_lut", { media: id, lutPath });
+    });
+  };
+
   const blurFacesFromCtx = () => {
     const id = ctxMenu?.id;
     setCtxMenu(null);
@@ -421,7 +431,7 @@ export function MediaPanel() {
             }}
           />
           <div
-            className="fixed z-50 rounded-md border border-neutral-700 bg-neutral-900 py-1 text-xs shadow-xl"
+            className="fixed z-50 max-h-[70vh] overflow-y-auto rounded-md border border-neutral-700 bg-neutral-900 py-1 text-xs shadow-xl"
             // clamped: a right-click near the bottom/right window edge must not push items off-screen
             style={{
               left: Math.max(0, Math.min(ctxMenu.x, window.innerWidth - 130)),
@@ -447,6 +457,11 @@ export function MediaPanel() {
                   if (!asset) return null;
                   const isVideo = asset.type === "video";
                   const hasAudio = isVideo ? asset.hasAudio !== false : asset.type === "audio";
+                  const Group = ({ label }: { label: string }) => (
+                    <div className="mt-1 border-t border-neutral-800 px-3 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+                      {label}
+                    </div>
+                  );
                   const Item = ({ tool, label, hint }: { tool: string; label: string; hint: string }) => (
                     <button
                       onClick={() => runOnAsset(tool)}
@@ -458,7 +473,9 @@ export function MediaPanel() {
                   );
                   return (
                     <>
-                      <div className="my-1 border-t border-neutral-800" />
+                      {/* Grouped rather than one long list: there are enough repair passes now that
+                          a flat menu would be a wall of similar-sounding verbs. */}
+                      <Group label={t("media.grpFix")} />
                       {isVideo && (
                         <button
                           onClick={blurFacesFromCtx}
@@ -470,7 +487,26 @@ export function MediaPanel() {
                       )}
                       {isVideo && <Item tool="stabilize_video" label={t("media.stabilize")} hint={t("media.stabilizeHint")} />}
                       {isVideo && <Item tool="denoise_video" label={t("media.removeGrain")} hint={t("media.removeGrainHint")} />}
+
+                      {isVideo && <Group label={t("media.grpColour")} />}
+                      {isVideo && <Item tool="auto_color" label={t("media.autoColor")} hint={t("media.autoColorHint")} />}
+                      {isVideo && (
+                        <button
+                          onClick={applyLutFromCtx}
+                          title={t("media.applyLutHint")}
+                          className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
+                        >
+                          {t("media.applyLut")}
+                        </button>
+                      )}
+
+                      {hasAudio && <Group label={t("media.grpAudio")} />}
                       {hasAudio && <Item tool="enhance_audio" label={t("media.cleanAudio")} hint={t("media.cleanAudioHint")} />}
+                      {hasAudio && <Item tool="repair_audio" label={t("media.repairAudio")} hint={t("media.repairAudioHint")} />}
+                      {hasAudio && <Item tool="match_loudness" label={t("media.loudness")} hint={t("media.loudnessHint")} />}
+
+                      <Group label={t("media.grpCheck")} />
+                      <Item tool="quality_report" label={t("media.qualityCheck")} hint={t("media.qualityCheckHint")} />
                       {isVideo && hasAudio && <Item tool="auto_chapters" label={t("media.chapters")} hint={t("media.chaptersHint")} />}
                     </>
                   );

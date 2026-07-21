@@ -400,6 +400,21 @@ const EN = {
   "media.renameItem": "Rename…",
   "media.duplicate": "Duplicate",
   "media.deleteN": "Delete {n} assets",
+  "media.grpFix": "Fix",
+  "media.grpColour": "Colour",
+  "media.grpAudio": "Audio",
+  "media.grpCheck": "Check",
+  "media.autoColor": "Auto colour…",
+  "media.autoColorHint": "Measure exposure and white balance, then correct what's actually off",
+  "media.applyLut": "Apply a LUT…",
+  "media.applyLutHint": "Grade with a .cube look-up table from your LUT pack",
+  "media.repairAudio": "Repair audio…",
+  "media.repairAudioHint": "Rebuild clipped samples, remove clicks, tame harsh S sounds",
+  "media.loudness": "Set loudness…",
+  "media.loudnessHint": "Normalise to what YouTube, TikTok or broadcast expect",
+  "media.qualityCheck": "Check before publishing…",
+  "media.qualityCheckHint": "Measure loudness, clipping, dead frames and flashing risk",
+  "media.pickLut": "Choose a LUT file",
 } as const;
 
 export type Key = keyof typeof EN;
@@ -767,6 +782,21 @@ const IT: Partial<Record<Key, string>> = {
   "media.renameItem": "Rinomina…",
   "media.duplicate": "Duplica",
   "media.deleteN": "Elimina {n} elementi",
+  "media.grpFix": "Correggi",
+  "media.grpColour": "Colore",
+  "media.grpAudio": "Audio",
+  "media.grpCheck": "Verifica",
+  "media.autoColor": "Colore automatico…",
+  "media.autoColorHint": "Misura esposizione e bilanciamento del bianco, poi corregge ciò che è davvero sbagliato",
+  "media.applyLut": "Applica una LUT…",
+  "media.applyLutHint": "Applica una tabella colore .cube dal tuo pacchetto LUT",
+  "media.repairAudio": "Ripara l'audio…",
+  "media.repairAudioHint": "Ricostruisce i picchi tagliati, toglie i click, addolcisce le S sibilanti",
+  "media.loudness": "Imposta il volume…",
+  "media.loudnessHint": "Normalizza al livello che si aspettano YouTube, TikTok o la TV",
+  "media.qualityCheck": "Verifica prima di pubblicare…",
+  "media.qualityCheckHint": "Misura volume, distorsione, fotogrammi morti e rischio flash",
+  "media.pickLut": "Scegli un file LUT",
 };
 
 const DICTS: Record<Lang, Partial<Record<Key, string>>> = { en: EN, it: IT };
