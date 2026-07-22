@@ -58,6 +58,9 @@ const EN = {
   "toolbar.feedback": "Feedback",
 
   // ── update banner ──
+  "whatsNew.eyebrow": "Updated",
+  "whatsNew.title": "What's new in {version}",
+  "whatsNew.dismiss": "Got it",
   "update.title": "Update",
   "update.available": "CupCat {version} is available. Update for the latest features and fixes.",
   "update.download": "Download the new version",
@@ -468,6 +471,9 @@ const IT: Partial<Record<Key, string>> = {
   "toolbar.connections": "Connessioni",
   "toolbar.feedback": "Feedback",
 
+  "whatsNew.eyebrow": "Aggiornato",
+  "whatsNew.title": "Novità della {version}",
+  "whatsNew.dismiss": "Ho capito",
   "update.title": "Aggiornamento",
   "update.available": "È disponibile CupCat {version}. Aggiorna per avere le ultime novità e correzioni.",
   "update.download": "Scarica la nuova versione",

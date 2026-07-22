@@ -3,6 +3,7 @@ import { t } from "./i18n";
 import { connectBridge, dismissToast, useEditor } from "./store";
 import { Toolbar } from "./Toolbar";
 import { LanguageGate } from "./LanguageGate";
+import { WhatsNew } from "./WhatsNew";
 import { SetupBanner, UpdateBanner } from "./Setup";
 import { ChatPanel } from "./ChatPanel";
 import { MediaPanel } from "./MediaPanel";
@@ -54,6 +55,7 @@ export function EditorApp() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-200">
       <LanguageGate />
+      <WhatsNew />
       <Toolbar />
       <UpdateBanner />
       <SetupBanner />

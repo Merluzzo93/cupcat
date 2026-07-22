@@ -4,7 +4,8 @@
 import { join } from "node:path";
 import { availableChatModels, type ChatRequest, getClaudeStatus, requestChatStop, runChat, setApiKey } from "./agent-chat";
 import { deleteChat, getChats, newChat, saveActiveChat, saveChat, selectChat } from "./chats";
-import { BRIDGE_PORT, exportsDir, webDir } from "./config";
+import { BRIDGE_PORT, CUPCAT_VERSION, exportsDir, webDir } from "./config";
+import { entriesBetween } from "./changelog";
 import { loadDiarization } from "./diarize";
 import { ensureCompoundBake } from "./export";
 import { type BridgeContext, executeTool, importFolderMedia } from "./executor";
@@ -166,7 +167,7 @@ export function startServer(ctx: BridgeContext) {
         return server.upgrade(req) ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
       }
 
-      if (path === "/health") return Response.json({ ok: true, port: BRIDGE_PORT });
+      if (path === "/health") return Response.json({ ok: true, port: BRIDGE_PORT, version: CUPCAT_VERSION }, { headers: cors });
 
       // In-app update check: compares the running build with the latest GitHub release. Returns
       // "no update" while the repo is private; starts working once releases are public.
@@ -504,6 +505,13 @@ export function startServer(ctx: BridgeContext) {
       // Speaker turns already worked out for the project's media, for the timeline's speaker lane.
       // Read-only and instant by construction: it reads the cache (memory, then disk) and NEVER
       // starts a diarization run, so opening a project can't kick off minutes of CPU by itself.
+      // What changed since the version the app last ran as. The web shell asks once at start-up
+      // and shows the card only when this comes back non-empty, so an ordinary launch is silent.
+      if (path === "/changelog") {
+        const seen = url.searchParams.get("seen") ?? "";
+        return Response.json({ current: CUPCAT_VERSION, entries: seen ? entriesBetween(seen, CUPCAT_VERSION) : [] }, { headers: cors });
+      }
+
       if (path === "/speakers") {
         const out: Record<string, { speakerCount: number; turns: { speaker: string; startSeconds: number; endSeconds: number }[] }> = {};
         for (const m of ctx.doc.project.media) {
