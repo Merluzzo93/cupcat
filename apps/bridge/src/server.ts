@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { availableChatModels, type ChatRequest, getClaudeStatus, requestChatStop, runChat, setApiKey } from "./agent-chat";
 import { deleteChat, getChats, newChat, saveActiveChat, saveChat, selectChat } from "./chats";
 import { BRIDGE_PORT, exportsDir, webDir } from "./config";
+import { loadDiarization } from "./diarize";
 import { ensureCompoundBake } from "./export";
 import { type BridgeContext, executeTool, importFolderMedia } from "./executor";
 import { createFeedbackBundle } from "./feedback";
@@ -498,6 +499,19 @@ export function startServer(ctx: BridgeContext) {
         const n = Math.min(400, Math.max(20, Number(url.searchParams.get("n")) || 120));
         const peaks = await audioPeaks(asset.url, asset.durationSeconds, n);
         return Response.json({ peaks: peaks ?? [] }, { headers: cors });
+      }
+
+      // Speaker turns already worked out for the project's media, for the timeline's speaker lane.
+      // Read-only and instant by construction: it reads the cache (memory, then disk) and NEVER
+      // starts a diarization run, so opening a project can't kick off minutes of CPU by itself.
+      if (path === "/speakers") {
+        const out: Record<string, { speakerCount: number; turns: { speaker: string; startSeconds: number; endSeconds: number }[] }> = {};
+        for (const m of ctx.doc.project.media) {
+          if (!m.url || (m.type !== "audio" && !m.hasAudio)) continue;
+          const d = await loadDiarization(m.url);
+          if (d && d.turns.length) out[m.id] = { speakerCount: d.speakerCount, turns: d.turns };
+        }
+        return Response.json({ assets: out }, { headers: cors });
       }
 
       if (path === "/mcp") {

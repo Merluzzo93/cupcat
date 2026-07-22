@@ -8,7 +8,7 @@
 // Results are cached per source path so get_transcript can tag words with speakers WITHOUT
 // re-running (or ever auto-running) the slow diarization pass.
 
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir, stat } from "node:fs/promises";
 import { cpus } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { FFMPEG_BIN, mediaDir } from "./config";
@@ -35,10 +35,52 @@ export interface Diarization {
 // is exactly what get_transcript should reflect when it tags words with speakers afterwards.
 const cache = new Map<string, Diarization>();
 
+// ── Persistent turn cache ────────────────────────────────────────────────────
+// The turns are what the timeline draws its speaker lane from, so losing them on restart would mean
+// the lane silently disappears from a project the user already diarized — with no way to tell that
+// from "this recording has one speaker". Same shape and reasoning as the transcript cache.
+interface DiarDiskCache {
+  mtimeMs: number;
+  size: number;
+  diarization: Diarization;
+}
+const diarFileFor = (path: string) => join(mediaDir, ".transcripts", `${basename(path, extname(path))}.speakers.json`);
+
+async function readDiarDisk(path: string): Promise<Diarization | null> {
+  try {
+    const src = await stat(path);
+    const c = (await Bun.file(diarFileFor(path)).json()) as DiarDiskCache;
+    if (c.mtimeMs !== src.mtimeMs || c.size !== src.size) return null; // the media changed under it
+    return Array.isArray(c.diarization?.turns) ? c.diarization : null;
+  } catch {
+    return null; // absent, stale or unreadable — just diarize again
+  }
+}
+
+async function writeDiarDisk(path: string, diarization: Diarization): Promise<void> {
+  try {
+    const src = await stat(path);
+    await mkdir(join(mediaDir, ".transcripts"), { recursive: true });
+    await Bun.write(diarFileFor(path), JSON.stringify({ mtimeMs: src.mtimeMs, size: src.size, diarization } satisfies DiarDiskCache));
+  } catch {
+    /* best-effort: without it the next run just costs time again */
+  }
+}
+
 /** The already-computed diarization for a media path, if identify_speakers ran on it this session.
  * get_transcript uses this to tag words without triggering a (slow) diarization run itself. */
 export function cachedDiarization(path: string): Diarization | null {
   return cache.get(path) ?? null;
+}
+
+/** Same, but also willing to go to disk — for callers that can await (the timeline's speaker lane
+ * asks for turns long after the run that produced them, often in a later session). */
+export async function loadDiarization(path: string): Promise<Diarization | null> {
+  const hot = cache.get(path);
+  if (hot) return hot;
+  const cold = await readDiarDisk(path);
+  if (cold) cache.set(path, cold);
+  return cold;
 }
 
 /** REPLACE the cached diarization for a path with human-corrected turns (set_speaker_turns).
@@ -49,6 +91,7 @@ export function cachedDiarization(path: string): Diarization | null {
 export function overrideDiarization(path: string, turns: SpeakerTurn[]): Diarization {
   const result: Diarization = { turns, speakerCount: new Set(turns.map((t) => t.speaker)).size };
   cache.set(path, result);
+  void writeDiarDisk(path, result); // a correction must outlive the session too
   return result;
 }
 
@@ -62,7 +105,16 @@ async function resolveModels(): Promise<{ segmentation: string; embedding: strin
     return null;
   }
   const seg = onnx.find((n) => /segmentation/i.test(n));
-  const emb = onnx.find((n) => !/segmentation/i.test(n));
+  // Which embedding model this picks decides whether two people are told apart AT ALL, so the
+  // choice is ordered rather than "whatever readdir returned first". CupCat shipped a Mandarin-only
+  // model (…_sv_zh-cn_…) until 1.7.13 and it merged distinct English speakers into one; CAM++ is
+  // trained across VoxCeleb + CNCeleb + 3D-Speaker, gets both right, and runs ~2.5x faster.
+  const candidates = onnx.filter((n) => !/segmentation/i.test(n));
+  const emb =
+    candidates.find((n) => /campplus/i.test(n)) ??
+    candidates.find((n) => /titanet/i.test(n)) ??
+    candidates.find((n) => !/zh-cn/i.test(n)) ?? // any non-Mandarin-only model beats the old one
+    candidates[0];
   if (!seg || !emb) return null;
   return { segmentation: join(DIARIZE_DIR, seg), embedding: join(DIARIZE_DIR, emb) };
 }
@@ -148,6 +200,7 @@ export async function diarizeSpeakers(mediaPath: string, opts: DiarizeOptions = 
   }
   const result: Diarization = { turns, speakerCount: new Set(turns.map((t) => t.speaker)).size };
   cache.set(mediaPath, result);
+  await writeDiarDisk(mediaPath, result);
   return result;
 }
 

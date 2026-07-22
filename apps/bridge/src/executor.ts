@@ -5,6 +5,7 @@
 // async: a placeholder asset is added immediately and filled in when the job finishes.
 
 import {
+  addClips,
   type Clip,
   type ClipType,
   type EditorDocument,
@@ -46,9 +47,10 @@ import { generate, getModel, type GenerateOptions, type HfModel, listModels, upl
 import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "./media";
 import { startRecording, stopRecording } from "./recorder";
 import { multicamCut } from "./multicam";
+import { offsetLabel, pickReference, planAnglePlacements } from "./synccam";
 import { magnify, punchIn } from "./zoom";
 import { renderMotionGraphic } from "./motion";
-import { cachedDiarization, type Diarization, diarizeSpeakers, overrideDiarization, speakerAt, type SpeakerTurn } from "./diarize";
+import { cachedDiarization, type Diarization, diarizeSpeakers, loadDiarization, overrideDiarization, speakerAt, type SpeakerTurn } from "./diarize";
 import { detectRetakes, transcribe } from "./transcribe";
 import { synthesizeSpeech } from "./tts";
 import { parseSubtitles, toSrt, translateSegments } from "./translate";
@@ -1429,7 +1431,9 @@ async function detectBeatsTool(ctx: BridgeContext, args: Args): Promise<ToolOut>
  * The result is cached per source path (diarize.ts), which is what lets get_transcript tag words
  * with speakers afterwards without re-running the slow pipeline. */
 async function identifySpeakersTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
-  const ref = strOpt(args.mediaRef);
+  // Half the media tools name this argument `media` and half `mediaRef`. Rejecting the other
+  // spelling teaches nobody anything and costs a round trip, so both are accepted here.
+  const ref = strOpt(args.mediaRef) ?? strOpt(args.media);
   const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
   if (!a?.url) return fail(`Asset not found: ${ref ?? "(mediaRef is required)"}`);
   if (!(a.type === "audio" || (a.type === "video" && a.hasAudio))) {
@@ -1437,7 +1441,12 @@ async function identifySpeakersTool(ctx: BridgeContext, args: Args): Promise<Too
   }
   let d: Diarization | null;
   try {
+    // The neural pass runs over the whole recording with nothing to report until it finishes, so
+    // say what is happening and roughly how long — silence here reads as a hung app.
+    const mins = Math.max(1, Math.round((a.durationSeconds ?? 0) / 60));
+    emitProgress("identify_speakers", `Listening for voices across ${mins} min of audio…`);
     d = await diarizeSpeakers(a.url, { numSpeakers: numOpt(args.numSpeakers) });
+    if (d) emitProgress("identify_speakers", `Found ${d.speakerCount} speaker(s) — marking their turns…`);
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
@@ -1453,6 +1462,36 @@ async function identifySpeakersTool(ctx: BridgeContext, args: Args): Promise<Too
     turns: d.turns.map((t) => ({ speaker: t.speaker, startSeconds: r3(t.startSeconds), endSeconds: r3(t.endSeconds) })),
     note: "Experimental local diarization (times are SOURCE seconds). get_transcript now tags this asset's words with these speaker labels.",
   });
+}
+
+/**
+ * Speaker turns already worked out for the project's media — READ ONLY, never starts a run.
+ *
+ * The timeline's speaker lane asks for this on every project open, so it has to be instant and it
+ * has to be safe: kicking off a minutes-long diarization because a window was opened would be
+ * indefensible. Absent turns simply mean "nobody has run Find speakers on this yet".
+ */
+async function getSpeakersTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.mediaRef) ?? strOpt(args.media);
+  const wanted = ref
+    ? [ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref)].filter((a): a is MediaAsset => !!a)
+    : ctx.doc.project.media.filter((m) => m.type === "audio" || (m.type === "video" && m.hasAudio));
+  if (ref && wanted.length === 0) return fail(`Asset not found: ${ref}`);
+
+  const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  const out: Record<string, unknown>[] = [];
+  for (const a of wanted) {
+    if (!a.url) continue;
+    const d = await loadDiarization(a.url);
+    if (!d || d.turns.length === 0) continue;
+    out.push({
+      mediaRef: a.id,
+      name: a.name,
+      speakerCount: d.speakerCount,
+      turns: d.turns.map((t) => ({ speaker: t.speaker, startSeconds: r3(t.startSeconds), endSeconds: r3(t.endSeconds) })),
+    });
+  }
+  return okJson({ assets: out });
 }
 
 /** Human correction for identify_speakers: REPLACE the cached speaker turns for an asset so
@@ -2100,6 +2139,133 @@ async function syncAudio(doc: EditorDocument, args: Args): Promise<ToolOut> {
   return okJson({ referenceClipId: refId, results });
 }
 
+/**
+ * sync_cameras — take several recordings of the SAME moment and lay them out already lined up.
+ *
+ * sync_audio moves clips that are already on the timeline and needs a reference clip id; this is
+ * the step before that, from the library: pick the files, get stacked angles whose frames line up.
+ * Owning the layout is also what lets it place a camera that started rolling BEFORE the reference —
+ * that one wants a negative start, so the whole rig slides right instead of clamping it to zero and
+ * leaving it quietly out of sync (see synccam.ts).
+ */
+async function syncCamerasTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const doc = ctx.doc;
+  const refs = Array.isArray(args.mediaRefs) ? args.mediaRefs.filter((x): x is string => typeof x === "string") : [];
+  if (refs.length < 2) return fail("sync_cameras needs mediaRefs with 2+ library videos — one per camera.");
+  if (refs.length > 8) return fail("sync_cameras takes up to 8 cameras at once.");
+
+  const assets = refs.map((r) => doc.asset(r) ?? doc.project.media.find((m) => m.name === r) ?? null);
+  const missing = refs.filter((r, i) => !assets[i]);
+  if (missing.length) return fail(`Asset not found: ${missing.join(", ")}`);
+  const cams = assets.map((a) => a!);
+  if (new Set(cams.map((c) => c.id)).size !== cams.length) return fail("The same asset was passed twice — pass each camera once.");
+  const noAudio = cams.filter((c) => !c.hasAudio);
+  if (noAudio.length) {
+    return fail(
+      `These have no sound to line up by: ${noAudio.map((c) => c.name).join(", ")}. ` +
+        "Cameras are matched by their common audio — add them by hand, or use sync_audio with embedded timecode.",
+    );
+  }
+
+  const fps = doc.timeline.fps;
+  const durFrames = (a: MediaAsset) => Math.max(1, Math.round((a.durationSeconds ?? 0) * fps));
+  const explicitRef = strOpt(args.referenceRef);
+  const refId = explicitRef
+    ? (cams.find((c) => c.id === explicitRef || c.name === explicitRef)?.id ?? null)
+    : pickReference(cams.map((c) => ({ id: c.id, durationFrames: durFrames(c) })));
+  if (!refId) return fail(`referenceRef is not one of the cameras: ${explicitRef}`);
+  const refCam = cams.find((c) => c.id === refId)!;
+
+  const searchWindow = numOpt(args.searchWindowSeconds) ?? 30;
+  const minConf = numOpt(args.minConfidence) ?? 0.5;
+  const lagLimit = Math.round(searchWindow * ENV_RATE);
+
+  emitProgress("sync_cameras", `Listening to ${cams.length} cameras…`);
+  const refEnv = await audioEnvelope(refCam.url!, 0, refCam.durationSeconds ?? 0, "camref", ENV_RATE);
+  if (!refEnv || refEnv.length < ENV_RATE) return fail(`Could not read the sound of "${refCam.name}" — it is the reference, so nothing can be lined up to it.`);
+
+  const measured: { id: string; lagSamples: number | null; durationFrames: number; confidence?: number; note?: string }[] = [];
+  let done = 0;
+  for (const cam of cams) {
+    if (cam.id === refId) {
+      measured.push({ id: cam.id, lagSamples: 0, durationFrames: durFrames(cam), confidence: 1 });
+      continue;
+    }
+    const env = await audioEnvelope(cam.url!, 0, cam.durationSeconds ?? 0, `cam${done++}`, ENV_RATE);
+    if (!env || env.length < ENV_RATE) {
+      measured.push({ id: cam.id, lagSamples: null, durationFrames: durFrames(cam), note: "no usable sound" });
+      continue;
+    }
+    const { lag, confidence } = bestLag(refEnv, env, -lagLimit, lagLimit);
+    const ok = confidence >= minConf;
+    measured.push({
+      id: cam.id,
+      lagSamples: ok ? lag : null,
+      durationFrames: durFrames(cam),
+      confidence: Math.round(confidence * 100) / 100,
+      ...(ok ? {} : { note: "sound did not match well enough — placed unaligned" }),
+    });
+    emitProgress("sync_cameras", `Lined up ${measured.length}/${cams.length}…`);
+  }
+
+  const placements = planAnglePlacements(measured, fps, ENV_RATE);
+  const byId = new Map(placements.map((p) => [p.id, p]));
+
+  // One video track per camera, so the angles read as a stack rather than fighting for room on a
+  // single track. They keep the order they were passed in, first at the bottom — that way the list
+  // the user picked still maps onto what they see, instead of being reshuffled by duration.
+  doc.mutate("Sync cameras", "agent", () => {
+    for (const cam of cams) doc.insertTrack(0, "video");
+  });
+  const entries = cams.map((cam, i) => ({
+    mediaRef: cam.id,
+    startFrame: byId.get(cam.id)!.startFrame,
+    durationFrames: byId.get(cam.id)!.durationFrames,
+    trackIndex: cams.length - 1 - i,
+  }));
+  addClips(doc, { entries }, "agent");
+
+  // Every camera recorded the same room, so keeping all the sound layers near-identical takes on
+  // top of each other — that is comb filtering, and it sounds like a bad phone call. The reference
+  // keeps its audio; the rest are silenced, not deleted, so switching to another camera's sound is
+  // one volume change away.
+  const muted: string[] = [];
+  if (strOpt(args.keepAudio) !== "all") {
+    const wanted = new Set(cams.filter((c) => c.id !== refId).map((c) => c.id));
+    doc.mutate("Silence duplicate camera sound", "agent", () => {
+      for (const track of doc.timeline.tracks) {
+        for (const clip of track.clips) {
+          if (clip.mediaType === "audio" && wanted.has(clip.mediaRef)) {
+            clip.volume = 0;
+            muted.push(clip.id);
+          }
+        }
+      }
+    });
+  }
+
+  const rows = cams.map((cam) => {
+    const p = byId.get(cam.id)!;
+    const m = measured.find((x) => x.id === cam.id)!;
+    return {
+      camera: cam.name,
+      mediaRef: cam.id,
+      reference: cam.id === refId,
+      startFrame: p.startFrame,
+      shift: offsetLabel(p.offsetFrames, fps),
+      aligned: p.aligned,
+      ...(m.confidence === undefined ? {} : { confidence: m.confidence }),
+      ...(m.note ? { note: m.note } : {}),
+    };
+  });
+  const failed = rows.filter((r) => !r.aligned);
+  const summary =
+    `Lined up ${rows.length - failed.length}/${rows.length} cameras on "${refCam.name}" — stacked, frames matching.` +
+    (failed.length ? ` ${failed.map((f) => `"${f.camera}" could not be matched and sits unaligned.`).join(" ")}` : "") +
+    (muted.length ? ` Kept "${refCam.name}"'s sound; silenced the duplicates.` : "");
+  return okJson({ summary, reference: refCam.name, cameras: rows });
+}
+
 // ── Higgsfield edit ops (CLI models: reframe / background-removal / outpaint / virality) ──
 
 async function startMediaEdit(
@@ -2506,6 +2672,8 @@ export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Arg
         return await detectBeatsTool(ctx, args);
       case "identify_speakers":
         return await identifySpeakersTool(ctx, args);
+      case "get_speakers":
+        return await getSpeakersTool(ctx, args);
       case "set_speaker_turns":
         return await setSpeakerTurnsTool(ctx, args);
       case "sync_to_beats":
@@ -2516,6 +2684,8 @@ export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Arg
         return await relinkMedia(ctx, args);
       case "sync_audio":
         return await syncAudio(ctx.doc, args);
+      case "sync_cameras":
+        return await syncCamerasTool(ctx, args);
       case "reframe":
         return await reframeTool(ctx, args);
       case "auto_reframe":

@@ -243,6 +243,20 @@ export function MediaPanel() {
   // Clips dialog uses, so a long clip doesn't look stuck.
   // Local repair passes. Each renders a NEW library asset and leaves the source alone, so the user
   // can always compare or fall back; progress streams on the shared tool-progress line.
+  // Several cameras on the same moment: line them up as stacked, frame-matched angles. Offered only
+  // when the selection could actually BE a multicam shoot — 2+ videos that all carry sound, since
+  // the sound they share is what the alignment is measured from.
+  const syncableCameras = (() => {
+    if (ctxIds.length < 2) return null;
+    const picked = ctxIds.map((id) => (project?.media ?? []).find((m) => m.id === id)).filter((m): m is MediaAsset => !!m);
+    if (picked.length < 2 || picked.length > 8) return null;
+    return picked.every((m) => m.type === "video" && m.hasAudio !== false) ? picked : null;
+  })();
+  const syncCamerasFromCtx = () => {
+    const refs = syncableCameras?.map((m) => m.id) ?? [];
+    setCtxMenu(null);
+    if (refs.length >= 2) void mcpCall("sync_cameras", { mediaRefs: refs });
+  };
   const runOnAsset = (tool: string) => {
     const id = ctxMenu?.id;
     setCtxMenu(null);
@@ -435,9 +449,27 @@ export function MediaPanel() {
             // clamped: a right-click near the bottom/right window edge must not push items off-screen
             style={{
               left: Math.max(0, Math.min(ctxMenu.x, window.innerWidth - 130)),
-              top: Math.max(0, Math.min(ctxMenu.y, window.innerHeight - (ctxIds.length <= 1 ? 100 : 40))),
+              top: Math.max(0, Math.min(ctxMenu.y, window.innerHeight - (ctxIds.length <= 1 || syncableCameras ? 100 : 40))),
             }}
           >
+            {/* Multi-selection used to offer nothing but Delete. A set of clips IS the unit a
+                multicam sync works on, so it earns its own entry — first, because it is the only
+                reason to have selected several videos at once. */}
+            {syncableCameras && (
+              <>
+                <div className="px-3 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+                  {t("media.grpPeople")}
+                </div>
+                <button
+                  onClick={syncCamerasFromCtx}
+                  title={t("media.syncCamerasHint")}
+                  className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
+                >
+                  {t("media.syncCameras", { n: syncableCameras.length })}
+                </button>
+                <div className="my-1 border-t border-neutral-800" />
+              </>
+            )}
             {ctxIds.length <= 1 && (
               <>
                 <button
@@ -504,6 +536,11 @@ export function MediaPanel() {
                       {hasAudio && <Item tool="enhance_audio" label={t("media.cleanAudio")} hint={t("media.cleanAudioHint")} />}
                       {hasAudio && <Item tool="repair_audio" label={t("media.repairAudio")} hint={t("media.repairAudioHint")} />}
                       {hasAudio && <Item tool="match_loudness" label={t("media.loudness")} hint={t("media.loudnessHint")} />}
+
+                      {/* Who is talking, and when. The turns it finds become a lane under the clip
+                          on the timeline, which is where the follow-up actions live. */}
+                      {hasAudio && <Group label={t("media.grpPeople")} />}
+                      {hasAudio && <Item tool="identify_speakers" label={t("media.findSpeakers")} hint={t("media.findSpeakersHint")} />}
 
                       <Group label={t("media.grpCheck")} />
                       <Item tool="quality_report" label={t("media.qualityCheck")} hint={t("media.qualityCheckHint")} />

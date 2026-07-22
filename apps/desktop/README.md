@@ -75,6 +75,13 @@ bun build --compile node_modules/@higgsfield/cli/bin/higgsfield.js \
 # + model ggml-base.bin — from huggingface.co/ggerganov/whisper.cpp
 # unzip the Release/ DLLs + whisper-cli.exe and the model into src-tauri/sidecars/
 
+# speaker diarization (sidecars/diarize) — sherpa-onnx CLI + DLLs + TWO .onnx models:
+#   sherpa-onnx-pyannote-segmentation-3-0.onnx            (who-speaks-when boundaries)
+#   3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx   (which voice is which)
+# Both from github.com/k2-fsa/sherpa-onnx/releases (speaker-recongition-models).
+# The embedding model MUST NOT be a Mandarin-only one (…_sv_zh-cn_…): CupCat shipped that until
+# 1.7.13 and it merged two clearly different English speakers into a single "S1".
+
 # face detection (apps/faces) — our own Rust sidecar, built from source
 cargo build --release --manifest-path apps/faces/Cargo.toml
 mkdir -p apps/desktop/src-tauri/sidecars/faces

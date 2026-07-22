@@ -789,6 +789,12 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "get_speakers",
+    description:
+      "The speaker turns ALREADY worked out for the project's media — read-only, instant, and it never starts a diarization run. Omit mediaRef for every asset that has turns (what the timeline's speaker lane loads on open); pass one to ask about a single asset. An asset missing from the result simply means identify_speakers has not been run on it yet. Times are SOURCE seconds.",
+    inputSchema: obj({ mediaRef: { type: "string", description: "One asset id or name; omit for all of them." } }, []),
+  },
+  {
     name: "set_speaker_turns",
     description:
       "Correct the speaker turns after identify_speakers when the attribution is wrong (similar voices get swapped) — what the user actually HEARS wins over the model. REPLACES the cached diarization for that asset: from then on get_transcript tags words with these corrected turns. Times are SOURCE seconds; the list must be sorted by startSeconds, non-overlapping, each turn with a positive span. Speaker labels are free-form ('S1', 'Anna', …).",
@@ -1073,6 +1079,21 @@ export const TOOL_DEFS: ToolDef[] = [
         ignoreSyncLock: { type: "boolean", description: "If true, this call does NOT ripple sync-locked sibling tracks (only the target track and its linked audio shift). Default false." },
       },
       ["ranges"],
+    ),
+  },
+  {
+    name: "sync_cameras",
+    description:
+      "MULTICAM ALIGN, from the library: take 2+ recordings of the SAME moment from different cameras and lay them on the timeline already lined up — one video track each, stacked, frames matching. THE tool for 'ho ripreso con due telefoni / allinea le camere / multicam'. Cameras are matched by the sound they share, so different mic positions are fine: only the loudness pattern is compared, not the tone. The longest camera is the reference unless referenceRef says otherwise; a camera that started rolling EARLIER slides the whole rig right instead of being clamped out of sync. Duplicate sound is silenced (not deleted) on every camera but the reference — pass keepAudio:'all' to keep it. Reports the shift and a confidence per camera and says plainly which cameras it could NOT match, rather than pretending. Follow with multicam_cut to switch between the aligned angles.",
+    inputSchema: obj(
+      {
+        mediaRefs: { type: "array", items: { type: "string" }, description: "2-8 video asset ids or names from get_media — one per camera." },
+        referenceRef: { type: "string", description: "Camera the others line up to (default: the longest, most likely to overlap the rest)." },
+        keepAudio: { type: "string", enum: ["reference", "all"], description: "'reference' (default) silences the duplicate sound on the other cameras; 'all' keeps every track audible." },
+        searchWindowSeconds: { type: "number", description: "How far apart the cameras might have started rolling, in seconds (default 30)." },
+        minConfidence: { type: "number", description: "Minimum match confidence 0..1 (default 0.5). Below it the camera is placed unaligned and flagged." },
+      },
+      ["mediaRefs"],
     ),
   },
   {
