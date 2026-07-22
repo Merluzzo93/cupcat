@@ -81,6 +81,11 @@ bun build --compile node_modules/@higgsfield/cli/bin/higgsfield.js \
 # Both from github.com/k2-fsa/sherpa-onnx/releases (speaker-recongition-models).
 # The embedding model MUST NOT be a Mandarin-only one (…_sv_zh-cn_…): CupCat shipped that until
 # 1.7.13 and it merged two clearly different English speakers into a single "S1".
+#
+# ⚠️ After REPLACING a sidecar file, delete the stale copy from the staging directory as well —
+# `tauri build` copies resources in but never removes ones that have gone from the source, so the
+# old file rides along in the installer:
+#   rm target/release/sidecars/<the file you replaced>
 
 # face detection (apps/faces) — our own Rust sidecar, built from source
 cargo build --release --manifest-path apps/faces/Cargo.toml
