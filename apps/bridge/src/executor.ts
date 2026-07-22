@@ -6,6 +6,7 @@
 
 import {
   addClips,
+  addTexts,
   type Clip,
   type ClipType,
   type EditorDocument,
@@ -52,6 +53,8 @@ import { multicamCut } from "./multicam";
 import { offsetLabel, pickReference, planAnglePlacements } from "./synccam";
 import { assignPieces, sourceToTimeline, speakerOrder, splitFramesForTurns } from "./speakerplan";
 import { framingFor, isConfident, mouthRegion, rankSpeakers, regionMotion } from "./emphasis";
+import { OPENERS, planOpener, rippleRight } from "./openers";
+import { loadBrandKit, saveBrandKit } from "./brandkit";
 import { magnify, punchIn } from "./zoom";
 import { renderMotionGraphic } from "./motion";
 import { cachedDiarization, type Diarization, diarizeSpeakers, loadDiarization, overrideDiarization, speakerAt, type SpeakerTurn } from "./diarize";
@@ -1498,6 +1501,115 @@ async function getSpeakersTool(ctx: BridgeContext, args: Args): Promise<ToolOut>
   return okJson({ assets: out });
 }
 
+/**
+ * add_opener — drop an intro at the head of the timeline or an outro at the tail.
+ *
+ * Built from a matte, text and (optionally) the brand logo rather than from a video file, so it
+ * takes the project's resolution, stays editable afterwards, and adds nothing to disk.
+ */
+async function addOpenerTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const doc = ctx.doc;
+  const id = strOpt(args.opener);
+  const def = OPENERS.find((o) => o.id === id);
+  if (!def) return fail(`Unknown opener "${id ?? ""}". Choose one of: ${OPENERS.map((o) => `${o.id} (${o.kind})`).join(", ")}.`);
+
+  const fps = doc.timeline.fps;
+  const seconds = Math.max(0.5, Math.min(30, numOpt(args.durationSeconds) ?? def.defaultSeconds));
+  const frames = Math.round(seconds * fps);
+  const brand = await loadBrandKit();
+  const layers = planOpener(def, { title: strOpt(args.title), subtitle: strOpt(args.subtitle), brand });
+
+  // Where it goes. An intro pushes the whole timeline right — an intro that overlaps the first shot
+  // is not an intro; an outro simply starts after the last frame in use.
+  const all = doc.timeline.tracks.flatMap((t, ti) => t.clips.map((c) => ({ id: c.id, trackIndex: ti, startFrame: c.startFrame })));
+  const end = doc.timeline.tracks.reduce((m, t) => t.clips.reduce((mm, c) => Math.max(mm, c.startFrame + c.durationFrames), m), 0);
+  let at = 0;
+  if (def.kind === "intro") {
+    const moves = rippleRight(all, frames);
+    if (moves.length) doc.mutate("Make room for the intro", "agent", () => doc.moveClips(moves));
+  } else {
+    at = end;
+  }
+
+  // Layers are created back to front; each needs its own track so they stack instead of replacing
+  // one another. Tracks go on top of what is already there.
+  const notes: string[] = [];
+  for (const layer of layers) {
+    if (layer.type === "matte") {
+      const r = await executeTool(ctx, "add_matte", { color: layer.color, startFrame: at, durationFrames: frames, trackIndex: 0 }, "agent");
+      if (r.isError) return fail("Could not create the backdrop for the opener.");
+    } else if (layer.type === "image") {
+      const logo = doc.asset(layer.mediaRef);
+      if (!logo) {
+        notes.push("the brand logo is missing from this project's library, so it was left out");
+        continue;
+      }
+      doc.mutate("Opener logo track", "agent", () => doc.insertTrack(0, "video"));
+      addClips(doc, { entries: [{ mediaRef: layer.mediaRef, startFrame: at, durationFrames: frames, trackIndex: 0 }] }, "agent");
+    } else {
+      doc.mutate("Opener text track", "agent", () => doc.insertTrack(0, "video"));
+      const before = new Set(doc.timeline.tracks[0]!.clips.map((c) => c.id));
+      addTexts(
+        doc,
+        {
+          entries: [
+            {
+              content: layer.content,
+              startFrame: at,
+              durationFrames: frames,
+              trackIndex: 0,
+              fontSize: layer.fontSize,
+              color: layer.color,
+              alignment: layer.alignment,
+              ...(brand.fontName ? { fontName: brand.fontName } : {}),
+            },
+          ],
+        },
+        "agent",
+      );
+      // Place it vertically. Without this the heading and the subtitle both land dead centre and
+      // print on top of each other — which looks like a rendering fault rather than a layout one.
+      const made = doc.timeline.tracks[0]!.clips.find((c) => !before.has(c.id));
+      if (made) {
+        doc.mutate("Position opener text", "agent", () => {
+          made.transform = { ...made.transform, centerY: layer.yFraction };
+        });
+      }
+    }
+  }
+
+  return ok(
+    `Added the "${def.label}" ${def.kind} — ${seconds}s at the ${def.kind === "intro" ? "start" : "end"}.` +
+      (def.kind === "intro" ? " Everything else moved right to make room." : "") +
+      (notes.length ? ` Note: ${notes.join("; ")}.` : "") +
+      " Drag its edge to change the length, or edit the text like any other clip.",
+  );
+}
+
+/** The brand kit — the logo and colours reused across projects, kept outside the install folder. */
+async function brandKitTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const patch: Record<string, string | undefined> = {};
+  for (const k of ["background", "accent", "fontName"] as const) {
+    const v = strOpt(args[k]);
+    if (v !== undefined) patch[k] = v;
+  }
+  const logo = strOpt(args.logoRef);
+  if (logo !== undefined) {
+    if (logo === "") patch.logoRef = "";
+    else {
+      const a = ctx.doc.asset(logo) ?? ctx.doc.project.media.find((m) => m.name === logo);
+      if (!a) return fail(`Asset not found: ${logo}`);
+      if (a.type !== "image") return fail("The logo must be an IMAGE asset from the library.");
+      patch.logoRef = a.id;
+    }
+  }
+  const kit = Object.keys(patch).length > 0 ? await saveBrandKit(patch) : await loadBrandKit();
+  return okJson({
+    ...kit,
+    note: "Kept outside the app folder, so updates never touch it.",
+  });
+}
+
 /** Grayscale frames of a span, small and evenly spaced, for measuring movement. One decode. */
 async function grayFrames(
   srcPath: string,
@@ -2913,6 +3025,10 @@ export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Arg
         return await detectBeatsTool(ctx, args);
       case "identify_speakers":
         return await identifySpeakersTool(ctx, args);
+      case "add_opener":
+        return await addOpenerTool(ctx, args);
+      case "brand_kit":
+        return await brandKitTool(ctx, args);
       case "emphasize_speaker":
         return await emphasizeSpeakerTool(ctx, args);
       case "split_audio_by_speaker":

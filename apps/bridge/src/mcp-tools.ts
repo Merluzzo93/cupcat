@@ -789,6 +789,34 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "add_opener",
+    description:
+      "Put an INTRO at the head of the timeline or an OUTRO at the tail. THE tool for 'metti un'intro / una sigla / un titolo iniziale / una schermata finale / outro con logo'. Built from a matte, text and (if the brand kit has one) the logo — not a video file — so it takes the project's resolution, stays fully editable, and adds nothing to disk. An intro pushes everything else right to make room. Openers: title-card, logo-open, title-over (intro); end-card, credits (outro). Say that the length can be changed by dragging the clip's edge.",
+    inputSchema: obj(
+      {
+        opener: { type: "string", enum: ["title-card", "logo-open", "title-over", "end-card", "credits"], description: "Which starter to use." },
+        title: { type: "string", description: "Main line. Sensible wording is used when omitted." },
+        subtitle: { type: "string", description: "Smaller second line (optional)." },
+        durationSeconds: { type: "number", description: "0.5-30 (each starter has its own default)." },
+      },
+      ["opener"],
+    ),
+  },
+  {
+    name: "brand_kit",
+    description:
+      "The logo and colours reused across every project — read it by passing nothing, change it by passing fields. Intros and outros fill themselves from this. It is stored OUTSIDE the app folder, so updating CupCat never touches it. Pass logoRef:'' to remove the logo.",
+    inputSchema: obj(
+      {
+        background: { type: "string", description: "Card background, '#RRGGBB'." },
+        accent: { type: "string", description: "Text colour, '#RRGGBB'." },
+        logoRef: { type: "string", description: "IMAGE asset id or name from the library; '' removes it." },
+        fontName: { type: "string", description: "Font used by opener text." },
+      },
+      [],
+    ),
+  },
+  {
     name: "emphasize_speaker",
     description:
       "PUNCH IN on whoever has the line: keyframes a gentle push-in onto the speaking person's face for their turns, then back out. THE tool for 'enfatizza questo spezzone / zoom su chi parla / stringi sulla persona'. Pass `speaker` (after identify_speakers) for all of that person's turns, or fromSeconds/toSeconds for one stretch. It is applied as keyframes on the clip — editable, undoable, and no re-encode, so nothing is lost in quality. When several faces are in shot it picks the one whose MOUTH is moving; if that measurement does not clearly decide (nobody obviously talking, an off-screen voice, faces too small) it skips that stretch and SAYS SO rather than guessing at someone. Report which stretches were skipped.",

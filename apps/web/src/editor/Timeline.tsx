@@ -136,6 +136,8 @@ export function Timeline() {
   const [snapLineX, setSnapLineX] = useState<number | null>(null); // px from left edge
   const [waves, setWaves] = useState<Record<string, number[]>>({}); // real audio peaks by mediaRef
   const [speakers, setSpeakers] = useState<SpeakerMap>({}); // diarized turns by mediaRef
+  const [openerPick, setOpenerPick] = useState<"intro" | "outro" | null>(null);
+  const [openerTitle, setOpenerTitle] = useState("");
 
   const tracksAreaRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -956,6 +958,30 @@ export function Timeline() {
               )}
             </div>
 
+            {/* Intro and outro slots, at the two ends of the timeline where they belong. Ghosted
+                rather than solid: they mark a place something CAN go, and must not read as clips
+                that are already there. */}
+            {tracks.some((tr) => tr.clips.length > 0) && (
+              <>
+                <button
+                  onClick={() => setOpenerPick("intro")}
+                  title={t("op.introHint")}
+                  className="absolute z-30 rounded border border-dashed border-neutral-600 bg-neutral-900/80 px-2 py-0.5 text-[10px] text-neutral-400 hover:border-neutral-400 hover:text-neutral-200"
+                  style={{ left: 4, top: RULER_H + tracks.length * TRACK_H + 6 }}
+                >
+                  + {t("op.intro")}
+                </button>
+                <button
+                  onClick={() => setOpenerPick("outro")}
+                  title={t("op.outroHint")}
+                  className="absolute z-30 rounded border border-dashed border-neutral-600 bg-neutral-900/80 px-2 py-0.5 text-[10px] text-neutral-400 hover:border-neutral-400 hover:text-neutral-200"
+                  style={{ left: Math.max(90, total * pxPerFrame + 6), top: RULER_H + tracks.length * TRACK_H + 6 }}
+                >
+                  {t("op.outro")} +
+                </button>
+              </>
+            )}
+
             {/* Snap line */}
             {snapLineX !== null && (
               <div
@@ -975,6 +1001,58 @@ export function Timeline() {
           </div>
         </div>
       </div>
+
+      {/* Intro / outro picker. Deliberately a short list with a title box and nothing else: the
+          result is ordinary clips, so anything further is done by editing them. */}
+      {openerPick && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-lg border border-neutral-700 bg-neutral-900 p-4 text-xs shadow-2xl">
+            <h3 className="mb-1 text-sm font-semibold text-neutral-100">
+              {openerPick === "intro" ? t("op.pickIntro") : t("op.pickOutro")}
+            </h3>
+            <p className="mb-3 text-[11px] text-neutral-400">{t("op.pickHint")}</p>
+            <label className="mb-3 block">
+              <span className="mb-1 block text-neutral-400">{t("op.title")}</span>
+              <input
+                value={openerTitle}
+                onChange={(e) => setOpenerTitle(e.target.value)}
+                placeholder={openerPick === "intro" ? t("op.titlePlaceholder") : t("op.outroPlaceholder")}
+                className="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100 outline-none focus:border-neutral-500"
+              />
+            </label>
+            <div className="space-y-1">
+              {(openerPick === "intro"
+                ? [
+                    { id: "title-card", label: t("op.titleCard") },
+                    { id: "logo-open", label: t("op.logoOpen") },
+                    { id: "title-over", label: t("op.titleOver") },
+                  ]
+                : [
+                    { id: "end-card", label: t("op.endCard") },
+                    { id: "credits", label: t("op.credits") },
+                  ]
+              ).map((o) => (
+                <button
+                  key={o.id}
+                  onClick={() => {
+                    void mcpCall("add_opener", { opener: o.id, ...(openerTitle.trim() ? { title: openerTitle.trim() } : {}) });
+                    setOpenerPick(null);
+                    setOpenerTitle("");
+                  }}
+                  className="block w-full rounded border border-neutral-700 px-3 py-2 text-left text-neutral-200 hover:border-neutral-500 hover:bg-neutral-800"
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button onClick={() => setOpenerPick(null)} className="rounded px-3 py-1 text-neutral-400 hover:text-neutral-200">
+                {t("common.cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Context menu — clamped so a right-click near the window edge can't push items off-screen */}
       {contextMenu && (
