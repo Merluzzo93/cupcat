@@ -17,6 +17,8 @@ import {
   makeClip,
   type MediaAsset,
   newId,
+  setKeyframes,
+  splitClip as splitClipCommand,
   TIMELINE_COMMANDS,
   trimClip as trimClipCommand,
   undo,
@@ -30,7 +32,7 @@ import { killTagged, run } from "./proc";
 import { emitProgress } from "./progress";
 import { type ExportFormat, type ExportQuality, ensureCompoundBake, exportTimeline, renderFrameAndScopes, renderFrameToFile, renderFrames, renderTimelineView, saveRangeToFile } from "./export";
 import { autoClips } from "./clips";
-import { renderFaceBlur } from "./faceblur";
+import { detectFacesAt, iou, renderFaceBlur } from "./faceblur";
 import { deflickerVideo, denoiseVideo, duckMusic, enhanceAudio, stabilizeVideo } from "./enhance";
 import { chapterTimestamp, detectChapters } from "./chapters";
 import { matchLoudness, repairAudio, type LoudnessTarget } from "./enhance";
@@ -48,6 +50,8 @@ import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "
 import { startRecording, stopRecording } from "./recorder";
 import { multicamCut } from "./multicam";
 import { offsetLabel, pickReference, planAnglePlacements } from "./synccam";
+import { assignPieces, sourceToTimeline, speakerOrder, splitFramesForTurns } from "./speakerplan";
+import { framingFor, isConfident, mouthRegion, rankSpeakers, regionMotion } from "./emphasis";
 import { magnify, punchIn } from "./zoom";
 import { renderMotionGraphic } from "./motion";
 import { cachedDiarization, type Diarization, diarizeSpeakers, loadDiarization, overrideDiarization, speakerAt, type SpeakerTurn } from "./diarize";
@@ -1494,6 +1498,243 @@ async function getSpeakersTool(ctx: BridgeContext, args: Args): Promise<ToolOut>
   return okJson({ assets: out });
 }
 
+/** Grayscale frames of a span, small and evenly spaced, for measuring movement. One decode. */
+async function grayFrames(
+  srcPath: string,
+  fromSeconds: number,
+  durSeconds: number,
+  fps: number,
+  width: number,
+): Promise<{ frames: Uint8Array[]; width: number; height: number } | null> {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const raw = join(exportsDir, `_mouth_${stamp}.gray`);
+  try {
+    const height = Math.round(width * 0.5625) & ~1;
+    const r = await run(FFMPEG_BIN, [
+      "-y", "-ss", fromSeconds.toFixed(3), "-t", durSeconds.toFixed(3), "-i", srcPath,
+      "-vf", `fps=${fps.toFixed(3)},scale=${width}:${height},format=gray`,
+      "-f", "rawvideo", "-pix_fmt", "gray", raw,
+    ]);
+    if (r.code !== 0) return null;
+    const buf = new Uint8Array(await Bun.file(raw).arrayBuffer());
+    const per = width * height;
+    const n = Math.floor(buf.length / per);
+    if (n < 2) return null;
+    const frames: Uint8Array[] = [];
+    for (let i = 0; i < n; i++) frames.push(buf.subarray(i * per, (i + 1) * per));
+    return { frames, width, height };
+  } catch {
+    return null;
+  } finally {
+    void rm(raw, { force: true }).catch(() => {});
+  }
+}
+
+/**
+ * emphasize_speaker — push in on whoever has the line.
+ *
+ * Applies keyframed scale and position to the clip rather than rendering a new file: the move stays
+ * editable, undoable, and costs no quality because nothing is re-encoded until export.
+ *
+ * Picking the right face when several are in shot is the hard part; see emphasis.ts. When the
+ * measurement does not clearly decide, this says so and does nothing, because punching in on the
+ * wrong person is worse than not punching in at all.
+ */
+async function emphasizeSpeakerTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const doc = ctx.doc;
+  const clipId = strOpt(args.clipId);
+  if (!clipId) return fail("clipId is required — the VIDEO clip to punch in on (from get_timeline).");
+  const clip = doc.getClip(clipId);
+  if (!clip) return fail(`Clip not found: ${clipId}`);
+  if (clip.mediaType !== "video") return fail("emphasize_speaker works on a VIDEO clip.");
+  const asset = doc.asset(clip.mediaRef);
+  if (!asset?.url) return fail("That clip has no media behind it.");
+
+  const fps = doc.timeline.fps;
+  const win = { startFrame: clip.startFrame, durationFrames: clip.durationFrames, trimStartFrame: clip.trimStartFrame, speed: clip.speed, fps };
+
+  // Which stretches to emphasise: a speaker's turns, or an explicit span.
+  let ranges: { from: number; to: number; label: string }[] = [];
+  const speaker = strOpt(args.speaker);
+  if (speaker) {
+    const d = await loadDiarization(asset.url);
+    if (!d) return fail(`No speaker turns for "${asset.name}" yet — run identify_speakers on it first.`);
+    ranges = d.turns.filter((t) => t.speaker === speaker).map((t) => ({ from: t.startSeconds, to: t.endSeconds, label: t.speaker }));
+    if (ranges.length === 0) return fail(`No turns for "${speaker}" in "${asset.name}". Known speakers: ${speakerOrder(d.turns).join(", ") || "none"}.`);
+  } else {
+    const from = numOpt(args.fromSeconds);
+    const to = numOpt(args.toSeconds);
+    if (from === undefined || to === undefined || to <= from) return fail("Pass a speaker, or fromSeconds/toSeconds (source seconds) for the stretch to emphasise.");
+    ranges = [{ from, to, label: "selection" }];
+  }
+
+  // Ignore stretches shorter than a second: a punch-in that lands and leaves inside 30 frames reads
+  // as a glitch, not as emphasis.
+  const srcStart = clip.trimStartFrame / fps;
+  const srcEnd = srcStart + (clip.durationFrames * (clip.speed > 0 ? clip.speed : 1)) / fps;
+  ranges = ranges
+    .map((r) => ({ ...r, from: Math.max(r.from, srcStart), to: Math.min(r.to, srcEnd) }))
+    .filter((r) => r.to - r.from >= 1);
+  if (ranges.length === 0) return fail("Those turns fall outside this clip (or are under a second long).");
+
+  const zoom = Math.max(0.15, Math.min(0.8, numOpt(args.zoom) ?? 0.4));
+  const scaleRows: unknown[][] = [];
+  const posRows: unknown[][] = [];
+  const applied: string[] = [];
+  const skipped: string[] = [];
+
+  for (const r of ranges) {
+    const dur = r.to - r.from;
+    emitProgress("emphasize_speaker", `Looking for who is speaking at ${r.from.toFixed(1)}s…`);
+    // Sample faces across the stretch, then measure mouth movement on the same span.
+    const times = [0.2, 0.4, 0.6, 0.8].map((f) => r.from + dur * f);
+    const hits = await detectFacesAt(asset.url, times);
+    const candidates: { x: number; y: number; w: number; h: number }[] = [];
+    for (const boxes of hits ?? []) {
+      for (const b of boxes) {
+        // Same person seen at several instants → one candidate, by overlap.
+        if (!candidates.some((c) => iou(c, b) > 0.3)) candidates.push(b);
+      }
+    }
+    if (candidates.length === 0) {
+      skipped.push(`${r.from.toFixed(1)}s: no face found`);
+      continue;
+    }
+
+    let chosen = candidates[0]!;
+    let note = "";
+    if (candidates.length > 1) {
+      // 960 wide. On a five-person conference grid (faces ~7% of the width) the right face won by
+      // roughly 6x at 320, 640 and 960 alike, so this is headroom rather than a fix: a mouth needs
+      // pixels to measure, and 320 leaves about seven across on a face that size. The whole pass
+      // costs ~1s, so buying margin for smaller faces is cheap.
+      const sampleFps = 8;
+      const g = await grayFrames(asset.url, r.from, Math.min(dur, 6), sampleFps, 960);
+      if (!g) {
+        skipped.push(`${r.from.toFixed(1)}s: could not measure who was talking`);
+        continue;
+      }
+      const mouthSeries: number[][] = candidates.map(() => []);
+      const frameSeries: number[] = [];
+      for (let k = 1; k < g.frames.length; k++) {
+        const a = g.frames[k - 1]!;
+        const b = g.frames[k]!;
+        frameSeries.push(regionMotion(a, b, g.width, g.height, { x: 0, y: 0, w: 1, h: 1 }));
+        candidates.forEach((c, ci) => mouthSeries[ci]!.push(regionMotion(a, b, g.width, g.height, mouthRegion(c))));
+      }
+      const ranked = rankSpeakers(mouthSeries, frameSeries);
+      if (!isConfident(ranked)) {
+        skipped.push(`${r.from.toFixed(1)}s: ${candidates.length} faces and none clearly speaking`);
+        continue;
+      }
+      chosen = candidates[ranked[0]!.index]!;
+      note = ` (of ${candidates.length} faces)`;
+    }
+
+    const f = framingFor(chosen, zoom);
+    // Clip-relative frames, with a short ease in and out so the move reads as a camera push rather
+    // than a jump cut in scale.
+    const f0 = Math.round(sourceToTimeline(r.from, win) - clip.startFrame);
+    const f1 = Math.round(sourceToTimeline(r.to, win) - clip.startFrame);
+    const ease = Math.min(Math.round(fps * 0.4), Math.max(2, Math.floor((f1 - f0) / 4)));
+    scaleRows.push([f0, 1, 1, "smooth"], [f0 + ease, f.scale, f.scale, "smooth"], [f1 - ease, f.scale, f.scale, "smooth"], [f1, 1, 1, "smooth"]);
+    posRows.push([f0, 0, 0, "smooth"], [f0 + ease, f.x, f.y, "smooth"], [f1 - ease, f.x, f.y, "smooth"], [f1, 0, 0, "smooth"]);
+    applied.push(`${r.from.toFixed(1)}-${r.to.toFixed(1)}s${note}`);
+  }
+
+  if (scaleRows.length === 0) {
+    return fail(`Nothing was emphasised. ${skipped.join("; ")}.`);
+  }
+  setKeyframes(doc, { clipId, property: "scale", keyframes: scaleRows }, "agent");
+  setKeyframes(doc, { clipId, property: "position", keyframes: posRows }, "agent");
+  return ok(
+    `Punched in on ${applied.length} stretch(es)${speaker ? ` of ${speaker}` : ""}: ${applied.join(", ")}.` +
+      (skipped.length ? ` Left alone — ${skipped.join("; ")}.` : "") +
+      " It is keyframed on the clip, so it stays editable and undoable.",
+  );
+}
+
+/**
+ * split_audio_by_speaker — give every voice its own audio track.
+ *
+ * Cuts the clip where the speaker changes and moves each piece onto a track named after whoever is
+ * talking. Nothing is duplicated or deleted: the pieces are the same audio, just sorted, so volume,
+ * cleanup or a mute can be applied per person. Stretches where nobody is speaking stay where they
+ * are — silence belongs to no one, and deleting audio on a guess is not recoverable by eye.
+ */
+async function splitAudioBySpeakerTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const doc = ctx.doc;
+  const clipId = strOpt(args.clipId);
+  if (!clipId) return fail("clipId is required — the audio clip to split (from get_timeline).");
+  const clip = doc.getClip(clipId);
+  if (!clip) return fail(`Clip not found: ${clipId}`);
+  if (clip.mediaType !== "audio") return fail("split_audio_by_speaker works on an AUDIO clip. For a video with sound, pass its linked audio clip.");
+  const asset = doc.asset(clip.mediaRef);
+  if (!asset?.url) return fail("That clip has no media behind it.");
+
+  const d = await loadDiarization(asset.url);
+  if (!d || d.turns.length === 0) {
+    return fail(`No speaker turns for "${asset.name}" yet — run identify_speakers on it first.`);
+  }
+  const order = speakerOrder(d.turns);
+  if (order.length < 2) return fail(`Only one speaker was found in "${asset.name}", so there is nothing to separate.`);
+
+  const fps = doc.timeline.fps;
+  const win = {
+    startFrame: clip.startFrame,
+    durationFrames: clip.durationFrames,
+    trimStartFrame: clip.trimStartFrame,
+    speed: clip.speed,
+    fps,
+  };
+  const cuts = splitFramesForTurns(d.turns, win);
+  const spanStart = clip.startFrame;
+  const spanEnd = clip.startFrame + clip.durationFrames;
+  const trackIndex = doc.findClip(clipId)!.trackIndex;
+
+  if (cuts.length) splitClipCommand(doc, { clipId, atFrames: cuts }, "agent");
+
+  // After the cuts the pieces are whatever now sits inside the original span on that track.
+  const pieces = doc.timeline.tracks[trackIndex]!.clips
+    .filter((c) => c.startFrame >= spanStart && c.startFrame + c.durationFrames <= spanEnd && c.mediaRef === clip.mediaRef)
+    .map((c) => ({ id: c.id, startFrame: c.startFrame, durationFrames: c.durationFrames }));
+  const assigned = assignPieces(pieces, d.turns, win);
+
+  // A track per speaker, inserted just below the original so the group reads together.
+  //
+  // The track's ID is captured the moment it is made, never its index: inserting the second speaker
+  // shifts the first one down, so an index recorded earlier now points at somebody else's track —
+  // which quietly piles every speaker onto one track and leaves the others empty.
+  const trackIds = new Map<string, string>();
+  doc.mutate("Tracks per speaker", "agent", () => {
+    order.forEach((s, i) => {
+      const at = doc.insertTrack(trackIndex + 1 + i, "audio");
+      const track = doc.timeline.tracks[at]!;
+      track.name = s;
+      trackIds.set(s, track.id);
+    });
+  });
+  const indexOf = (id: string) => doc.timeline.tracks.findIndex((t) => t.id === id);
+
+  const moves: { clipId: string; toTrack: number; toFrame: number }[] = [];
+  const counts = new Map<string, number>();
+  for (const a of assigned) {
+    if (!a.speaker) continue;
+    const ti = indexOf(trackIds.get(a.speaker)!);
+    const piece = pieces.find((p) => p.id === a.id)!;
+    moves.push({ clipId: a.id, toTrack: ti, toFrame: piece.startFrame });
+    counts.set(a.speaker, (counts.get(a.speaker) ?? 0) + 1);
+  }
+  if (moves.length === 0) return fail("None of the pieces could be attributed to a speaker — nothing was moved.");
+  doc.mutate("Split audio by speaker", "agent", () => doc.moveClips(moves));
+
+  const summary = order.map((s) => `${s}: ${counts.get(s) ?? 0} piece(s)`).join(", ");
+  return ok(
+    `Separated "${asset.name}" into ${order.length} tracks — ${summary}. Silence stayed on the original track. ` +
+      `The picture was cut at the same points so it stays locked to its sound.`,
+  );
+}
+
 /** Human correction for identify_speakers: REPLACE the cached speaker turns for an asset so
  * get_transcript tags words with the corrected attribution from then on. Pure session-cache
  * override (no document mutation) — diarization results already live outside the project file. */
@@ -2672,6 +2913,10 @@ export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Arg
         return await detectBeatsTool(ctx, args);
       case "identify_speakers":
         return await identifySpeakersTool(ctx, args);
+      case "emphasize_speaker":
+        return await emphasizeSpeakerTool(ctx, args);
+      case "split_audio_by_speaker":
+        return await splitAudioBySpeakerTool(ctx, args);
       case "get_speakers":
         return await getSpeakersTool(ctx, args);
       case "set_speaker_turns":

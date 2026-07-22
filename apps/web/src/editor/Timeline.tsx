@@ -11,6 +11,7 @@ import {
   cutClips,
   deleteSelected,
   duplicateSelected,
+  mcpCall,
   mediaUrl,
   pasteClips,
   sendCommand,
@@ -56,6 +57,52 @@ interface ContextMenu {
   clipId: string | null; // null = empty area
 }
 
+// ── Speaker turns ────────────────────────────────────────────────────────────
+export interface SpeakerTurn {
+  speaker: string;
+  startSeconds: number;
+  endSeconds: number;
+}
+type SpeakerMap = Record<string, { speakerCount: number; turns: SpeakerTurn[] }>;
+
+/** A stable colour per speaker label, so S2 is the same colour on every clip and in every session.
+ * Hand-picked rather than hashed: hashing gave neighbouring speakers near-identical hues, which is
+ * precisely the thing this lane exists to make distinguishable at a glance. */
+const SPEAKER_COLOURS = ["#38bdf8", "#f472b6", "#facc15", "#4ade80", "#c084fc", "#fb923c", "#2dd4bf", "#f87171"];
+export function speakerColour(label: string, order: string[]): string {
+  const i = order.indexOf(label);
+  return SPEAKER_COLOURS[(i < 0 ? 0 : i) % SPEAKER_COLOURS.length]!;
+}
+
+/**
+ * Turn source-time speaker turns into bars positioned INSIDE a clip, as fractions of its width.
+ *
+ * A clip shows a window of its source (trimStart..trimStart+visible) and can be sped up, so a turn
+ * at source second 90 is not at timeline second 90. Turns outside the window are dropped and ones
+ * straddling an edge are clipped, otherwise a trimmed clip would paint speaker bars for words that
+ * were cut out of it.
+ */
+export function turnsToBars(
+  turns: SpeakerTurn[],
+  opts: { trimStartFrames: number; durationFrames: number; speed: number; fps: number },
+): { speaker: string; left: number; width: number }[] {
+  const { fps } = opts;
+  const speed = opts.speed > 0 ? opts.speed : 1;
+  const srcStart = opts.trimStartFrames / fps;
+  const srcSpan = (opts.durationFrames * speed) / fps;
+  if (srcSpan <= 0) return [];
+  const out: { speaker: string; left: number; width: number }[] = [];
+  for (const t of turns) {
+    const a = Math.max(t.startSeconds, srcStart);
+    const b = Math.min(t.endSeconds, srcStart + srcSpan);
+    if (b <= a) continue;
+    const left = (a - srcStart) / srcSpan;
+    const width = (b - a) / srcSpan;
+    if (width > 0.0005) out.push({ speaker: t.speaker, left, width });
+  }
+  return out;
+}
+
 // ── Deterministic waveform bars (visual affordance, not sample-accurate) ─────
 function waveformBars(clipId: string, count: number): number[] {
   let seed = 0;
@@ -88,6 +135,7 @@ export function Timeline() {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [snapLineX, setSnapLineX] = useState<number | null>(null); // px from left edge
   const [waves, setWaves] = useState<Record<string, number[]>>({}); // real audio peaks by mediaRef
+  const [speakers, setSpeakers] = useState<SpeakerMap>({}); // diarized turns by mediaRef
 
   const tracksAreaRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -172,6 +220,16 @@ export function Timeline() {
     if (target && isCompatible(asset.type, target.type)) entry.trackIndex = tIdx;
     sendCommand("add_clips", { entries: [entry] });
   };
+
+  // Speaker turns for every asset that has been through Find speakers. One request for the whole
+  // project (the endpoint reads a cache and never starts a run), refreshed whenever the media list
+  // changes — which is also when a diarization that just finished becomes visible.
+  useEffect(() => {
+    fetch(`${BRIDGE_HTTP}/speakers`)
+      .then((r) => r.json())
+      .then((j) => setSpeakers(j?.assets && typeof j.assets === "object" ? (j.assets as SpeakerMap) : {}))
+      .catch(() => {});
+  }, [project?.media]);
 
   // Fetch real sample-derived waveform peaks for each audio clip's asset (cached by mediaRef).
   useEffect(() => {
@@ -729,6 +787,20 @@ export function Timeline() {
                     const realPeaks = c.mediaType === "audio" ? waves[c.mediaRef] : undefined;
                     const bars =
                       c.mediaType === "audio" ? (realPeaks && realPeaks.length ? realPeaks : waveformBars(c.id, 22)) : null;
+                    // Who is talking, drawn as a strip along the bottom of the clip. It rides the
+                    // clip rather than taking a track of its own so trimming, moving and splitting
+                    // carry it along for free — and so it cannot drift out of step with the audio.
+                    const spk = c.mediaRef ? speakers[c.mediaRef] : undefined;
+                    const speakerBars =
+                      spk && spk.turns.length
+                        ? turnsToBars(spk.turns, {
+                            trimStartFrames: c.trimStartFrame,
+                            durationFrames: durF,
+                            speed: c.speed,
+                            fps,
+                          })
+                        : null;
+                    const speakerOrder = spk ? [...new Set(spk.turns.map((t) => t.speaker))] : [];
 
                     return (
                       <div
@@ -814,6 +886,28 @@ export function Timeline() {
                                 className="w-px flex-shrink-0 rounded-full bg-white/75"
                                 style={{ height: `${Math.round(h * 100)}%` }}
                               />
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Speaker lane. Each bar carries its label as a tooltip and, when there is
+                            room, printed on the bar — a colour alone tells you SOMETHING changed
+                            but not who, and "who" is the whole point. */}
+                        {speakerBars && speakerBars.length > 0 && (
+                          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[9px] overflow-hidden rounded-b bg-black/35">
+                            {speakerBars.map((b, bi) => (
+                              <div
+                                key={`${b.speaker}-${bi}`}
+                                className="absolute inset-y-0 flex items-center justify-center overflow-hidden text-[7px] font-semibold leading-none text-black/80"
+                                style={{
+                                  left: `${b.left * 100}%`,
+                                  width: `${b.width * 100}%`,
+                                  backgroundColor: speakerColour(b.speaker, speakerOrder),
+                                }}
+                                title={b.speaker}
+                              >
+                                {b.width * durF * pxPerFrame > 26 ? b.speaker : ""}
+                              </div>
                             ))}
                           </div>
                         )}
@@ -952,6 +1046,58 @@ export function Timeline() {
                   closeCtx();
                 }}
               />
+              {/* People & cameras. These appear only once the clip can actually take them: Find
+                  speakers needs sound, and the two that follow need turns to work from — offering
+                  them before that would just be a menu full of things that error. */}
+              {(() => {
+                const c = findClip(contextMenu.clipId!);
+                if (!c) return null;
+                const asset = c.mediaRef ? project?.media.find((m) => m.id === c.mediaRef) : undefined;
+                const hasSound = c.mediaType === "audio" || (c.mediaType === "video" && asset?.hasAudio !== false);
+                if (!hasSound) return null;
+                const known = c.mediaRef ? speakers[c.mediaRef] : undefined;
+                const many = (known?.speakerCount ?? 0) > 1;
+                return (
+                  <>
+                    <div className="my-1 border-t border-neutral-800" />
+                    <div className="px-3 pb-0.5 pt-0.5 text-[9px] font-medium uppercase tracking-wide text-neutral-500">
+                      {t("lb.grpPeople")}
+                    </div>
+                    {!known && (
+                      <CtxItem
+                        label={t("lb.findSpeakers")}
+                        onAction={() => {
+                          void mcpCall("identify_speakers", { media: c.mediaRef });
+                          closeCtx();
+                        }}
+                      />
+                    )}
+                    {known && c.mediaType === "audio" && many && (
+                      <CtxItem
+                        label={t("lb.splitBySpeaker")}
+                        onAction={() => {
+                          void mcpCall("split_audio_by_speaker", { clipId: c.id });
+                          closeCtx();
+                        }}
+                      />
+                    )}
+                    {known && c.mediaType === "video" && (
+                      <CtxItem
+                        label={t("lb.emphasize")}
+                        onAction={() => {
+                          void mcpCall("emphasize_speaker", { clipId: c.id, speaker: [...new Set(known.turns.map((x) => x.speaker))][0] });
+                          closeCtx();
+                        }}
+                      />
+                    )}
+                    {known && (
+                      <div className="px-3 pb-1 pt-0.5 text-[9px] text-neutral-500">
+                        {t("lb.speakersFound", { n: known.speakerCount })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </>
           ) : (
             <>

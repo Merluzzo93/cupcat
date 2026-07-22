@@ -789,6 +789,27 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "emphasize_speaker",
+    description:
+      "PUNCH IN on whoever has the line: keyframes a gentle push-in onto the speaking person's face for their turns, then back out. THE tool for 'enfatizza questo spezzone / zoom su chi parla / stringi sulla persona'. Pass `speaker` (after identify_speakers) for all of that person's turns, or fromSeconds/toSeconds for one stretch. It is applied as keyframes on the clip — editable, undoable, and no re-encode, so nothing is lost in quality. When several faces are in shot it picks the one whose MOUTH is moving; if that measurement does not clearly decide (nobody obviously talking, an off-screen voice, faces too small) it skips that stretch and SAYS SO rather than guessing at someone. Report which stretches were skipped.",
+    inputSchema: obj(
+      {
+        clipId: { type: "string", description: "The VIDEO clip to punch in on (from get_timeline)." },
+        speaker: { type: "string", description: "Speaker label from identify_speakers ('S1'…) — emphasises all of that person's turns." },
+        fromSeconds: { type: "number", description: "Start of one stretch, in SOURCE seconds (instead of speaker)." },
+        toSeconds: { type: "number", description: "End of that stretch, in SOURCE seconds." },
+        zoom: { type: "number", description: "How much of the frame height the face should fill, 0.15-0.8 (default 0.4). Higher = tighter." },
+      },
+      ["clipId"],
+    ),
+  },
+  {
+    name: "split_audio_by_speaker",
+    description:
+      "Give every voice its own audio track: cuts an audio clip where the speaker changes and moves each piece onto a track named after them ('S1', 'S2'…). THE tool for 'separa gli speaker / una traccia per persona / dividi l'audio per chi parla'. Needs identify_speakers to have run on that asset first. Nothing is duplicated or deleted — the pieces are the same audio, sorted, so volume, cleanup or a mute can be applied per person; stretches where nobody speaks stay on the original track. If the clip is linked to a picture, the picture is cut at the same points (that is what keeps it locked to its sound) — say so when reporting, it is visible on the timeline. Undoable.",
+    inputSchema: obj({ clipId: { type: "string", description: "The AUDIO clip to separate (from get_timeline). For a video with sound, pass its linked audio clip." } }, ["clipId"]),
+  },
+  {
     name: "get_speakers",
     description:
       "The speaker turns ALREADY worked out for the project's media — read-only, instant, and it never starts a diarization run. Omit mediaRef for every asset that has turns (what the timeline's speaker lane loads on open); pass one to ask about a single asset. An asset missing from the result simply means identify_speakers has not been run on it yet. Times are SOURCE seconds.",
