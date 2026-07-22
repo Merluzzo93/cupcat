@@ -4,6 +4,7 @@ import { connectBridge, dismissToast, useEditor } from "./store";
 import { Toolbar } from "./Toolbar";
 import { LanguageGate } from "./LanguageGate";
 import { WhatsNew } from "./WhatsNew";
+import { Onboarding } from "./Onboarding";
 import { SetupBanner, UpdateBanner } from "./Setup";
 import { ChatPanel } from "./ChatPanel";
 import { MediaPanel } from "./MediaPanel";
@@ -56,6 +57,7 @@ export function EditorApp() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-200">
       <LanguageGate />
       <WhatsNew />
+      <Onboarding />
       <Toolbar />
       <UpdateBanner />
       <SetupBanner />

@@ -22,7 +22,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "**Who is talking** is drawn along the bottom of the clip, a colour per person.",
       "**One track per speaker** — separate the voices onto their own tracks, so volume and clean-up can be per person.",
       "**Emphasise a speaker** — a gentle push-in onto whoever has the line. It picks the face whose mouth is moving, and when it cannot tell it says so instead of zooming onto the wrong person.",
-      "This card, from now on, after every update.",
+      "**Intro and Outro slots** at the two ends of the timeline. They land as ordinary clips, so you can drag an edge to change the length or retype the words.",
+      "**A brand kit** — your logo and colours, kept outside the app folder so updating CupCat never touches them. Intros and outros fill themselves from it.",
+      "A short **tour on first run**, and this card, from now on, after every update.",
     ],
   },
   {
