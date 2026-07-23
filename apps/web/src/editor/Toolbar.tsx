@@ -5,6 +5,7 @@ import { t } from "./i18n";
 import { LanguageSetting } from "./LanguageGate";
 import { ShortcutsEditor } from "./ShortcutsEditor";
 import {
+  connectBridge,
   BRIDGE_HTTP,
   downloadFile,
   higgsfieldLogin,
@@ -381,9 +382,18 @@ export function Toolbar() {
     {!connected && (
       // The tiny "offline" pill is easy to miss while every edit silently goes nowhere — make the
       // disconnected state unmistakable (the WS layer keeps retrying on its own).
-      <div className="flex items-center justify-center gap-2 border-b border-red-900/60 bg-red-950/60 px-3 py-1 text-[11px] text-red-200">
+      <div className="flex flex-wrap items-center justify-center gap-2 border-b border-red-900/60 bg-red-950/60 px-3 py-1 text-[11px] text-red-200">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" />
-        Connection to the editor engine lost — reconnecting… (edits won't apply until it's back)
+        <span>{t("conn.lost")}</span>
+        {/* A dead end before: it said "reconnecting" and there was nothing to press. The retry
+            is what a busy engine needs (it comes back once the work finishes) and reloading is
+            the honest fallback — the project is on disk, so nothing is lost either way. */}
+        <button onClick={() => connectBridge()} className="rounded border border-red-700 px-2 py-0.5 hover:bg-red-900/60">
+          {t("conn.retry")}
+        </button>
+        <button onClick={() => window.location.reload()} className="rounded border border-red-700 px-2 py-0.5 hover:bg-red-900/60">
+          {t("conn.reload")}
+        </button>
       </div>
     )}
     </>

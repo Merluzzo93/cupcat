@@ -29,7 +29,7 @@ import { detectBeatsFromEnvelope } from "./beats";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { BRIDGE_PORT, exportsDir, FFMPEG_BIN, mediaDir, projectRoot } from "./config";
-import { killTagged, run } from "./proc";
+import { beginJob, cancelJob, currentJob_, endJob, jobCancelled, killTagged, run } from "./proc";
 import { emitProgress } from "./progress";
 import { type ExportFormat, type ExportQuality, ensureCompoundBake, exportTimeline, renderFrameAndScopes, renderFrameToFile, renderFrames, renderTimelineView, saveRangeToFile } from "./export";
 import { autoClips } from "./clips";
@@ -51,6 +51,7 @@ import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "
 import { startRecording, stopRecording } from "./recorder";
 import { multicamCut } from "./multicam";
 import { offsetLabel, pickReference, planAnglePlacements } from "./synccam";
+import { findLag, probeSeconds } from "./align";
 import { assignPieces, sourceToTimeline, speakerOrder, splitFramesForTurns } from "./speakerplan";
 import { framingFor, isConfident, mouthRegion, rankSpeakers, regionMotion } from "./emphasis";
 import { OPENERS, planOpener, rippleRight } from "./openers";
@@ -1451,7 +1452,13 @@ async function identifySpeakersTool(ctx: BridgeContext, args: Args): Promise<Too
     // The neural pass runs over the whole recording with nothing to report until it finishes, so
     // say what is happening and roughly how long — silence here reads as a hung app.
     const mins = Math.max(1, Math.round((a.durationSeconds ?? 0) / 60));
-    emitProgress("identify_speakers", `Listening for voices across ${mins} min of audio…`);
+    // Say how long, not just that it is working. The neural pass runs at roughly 0.15x the
+    // recording length (measured: 27s for 3 minutes of audio, and more threads do not help —
+    // 8, 12 and 16 all land within 10% of each other), so a half-hour file is about five
+    // minutes. An honest estimate lets someone decide to wait or to stop; a bare spinner does
+    // not.
+    const estMin = Math.max(1, Math.round(((a.durationSeconds ?? 0) * 0.15) / 60));
+    emitProgress("identify_speakers", `Listening for voices across ${mins} min of audio — about ${estMin} min…`);
     d = await diarizeSpeakers(a.url, { numSpeakers: numOpt(args.numSpeakers) });
     if (d) emitProgress("identify_speakers", `Found ${d.speakerCount} speaker(s) — marking their turns…`);
   } catch (e) {
@@ -2492,6 +2499,8 @@ async function syncAudio(doc: EditorDocument, args: Args): Promise<ToolOut> {
   return okJson({ referenceClipId: refId, results });
 }
 
+const SYNC_TAG = "sync_cameras";
+
 /**
  * sync_cameras — take several recordings of the SAME moment and lay them out already lined up.
  *
@@ -2502,6 +2511,10 @@ async function syncAudio(doc: EditorDocument, args: Args): Promise<ToolOut> {
  * leaving it quietly out of sync (see synccam.ts).
  */
 async function syncCamerasTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  return await runSyncCameras(ctx, args);
+}
+
+async function runSyncCameras(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const doc = ctx.doc;
   const refs = Array.isArray(args.mediaRefs) ? args.mediaRefs.filter((x): x is string => typeof x === "string") : [];
   if (refs.length < 2) return fail("sync_cameras needs mediaRefs with 2+ library videos — one per camera.");
@@ -2533,8 +2546,14 @@ async function syncCamerasTool(ctx: BridgeContext, args: Args): Promise<ToolOut>
   const minConf = numOpt(args.minConfidence) ?? 0.5;
   const lagLimit = Math.round(searchWindow * ENV_RATE);
 
-  emitProgress("sync_cameras", `Listening to ${cams.length} cameras…`);
-  const refEnv = await audioEnvelope(refCam.url!, 0, refCam.durationSeconds ?? 0, "camref", ENV_RATE);
+  // Only listen to as much as the answer needs. Reading two half-hour cameras end to end costs
+  // gigabytes and minutes; a few minutes of their shared audio decides an offset of a few seconds
+  // just as well. Measured on a 9.4 GB camera: 2.25 GB read → 0.24 GB.
+  const shortest = Math.min(...cams.map((c) => c.durationSeconds ?? 0).filter((d) => d > 0), Infinity);
+  const probe = probeSeconds(searchWindow, Number.isFinite(shortest) ? shortest : searchWindow * 6);
+
+  emitProgress("sync_cameras", `Listening to ${cams.length} cameras (${Math.round(probe)}s of each)…`);
+  const refEnv = await audioEnvelope(refCam.url!, 0, probe, "camref", ENV_RATE, 8000, SYNC_TAG);
   if (!refEnv || refEnv.length < ENV_RATE) return fail(`Could not read the sound of "${refCam.name}" — it is the reference, so nothing can be lined up to it.`);
 
   const measured: { id: string; lagSamples: number | null; durationFrames: number; confidence?: number; note?: string }[] = [];
@@ -2544,12 +2563,18 @@ async function syncCamerasTool(ctx: BridgeContext, args: Args): Promise<ToolOut>
       measured.push({ id: cam.id, lagSamples: 0, durationFrames: durFrames(cam), confidence: 1 });
       continue;
     }
-    const env = await audioEnvelope(cam.url!, 0, cam.durationSeconds ?? 0, `cam${done++}`, ENV_RATE);
+    if (jobCancelled()) return fail("Stopped. Nothing was changed.");
+    emitProgress("sync_cameras", `Listening to "${cam.name}"…`);
+    const env = await audioEnvelope(cam.url!, 0, probe, `cam${done++}`, ENV_RATE, 8000, SYNC_TAG);
     if (!env || env.length < ENV_RATE) {
       measured.push({ id: cam.id, lagSamples: null, durationFrames: durFrames(cam), note: "no usable sound" });
       continue;
     }
-    const { lag, confidence } = bestLag(refEnv, env, -lagLimit, lagLimit);
+    emitProgress("sync_cameras", `Matching "${cam.name}" against "${refCam.name}"…`);
+    // Hand the event loop back before the arithmetic: the WebSocket that tells the editor the
+    // engine is alive lives on this same thread.
+    await new Promise((r) => setTimeout(r, 0));
+    const { lag, confidence } = findLag(refEnv, env, -lagLimit, lagLimit);
     const ok = confidence >= minConf;
     measured.push({
       id: cam.id,
@@ -2560,6 +2585,7 @@ async function syncCamerasTool(ctx: BridgeContext, args: Args): Promise<ToolOut>
     });
     emitProgress("sync_cameras", `Lined up ${measured.length}/${cams.length}…`);
   }
+  if (jobCancelled()) return fail("Stopped. Nothing was changed.");
 
   const placements = planAnglePlacements(measured, fps, ENV_RATE);
   const byId = new Map(placements.map((p) => [p.id, p]));
@@ -2891,7 +2917,59 @@ async function importFromUrlTool(ctx: BridgeContext, args: Args, source: EditSou
 
 // ── dispatch ──
 
+// Operations that can run for minutes. Each one gets a named job: the UI shows it running with a
+// Stop button, and everything it spawns dies when that is pressed. Before this, work started from a
+// BUTTON had neither — a slow run was indistinguishable from a frozen app, with nothing to do but
+// wait and watch the editor decide the engine had died.
+const LONG_TOOLS: Record<string, string> = {
+  sync_cameras: "Syncing cameras",
+  identify_speakers: "Finding speakers",
+  emphasize_speaker: "Emphasising the speaker",
+  get_transcript: "Transcribing",
+  auto_clips: "Making clips",
+  blur_faces: "Blurring faces",
+  separate_stems: "Separating stems",
+  dub_timeline: "Dubbing",
+  auto_reframe: "Reframing",
+  stabilize_video: "Stabilising",
+  denoise_video: "Removing grain",
+  deflicker_video: "Removing flicker",
+  enhance_audio: "Cleaning the audio",
+  repair_audio: "Repairing the audio",
+  match_loudness: "Matching loudness",
+  auto_color: "Correcting colour",
+  apply_lut: "Applying the LUT",
+  quality_report: "Checking quality",
+  auto_chapters: "Finding chapters",
+  auto_rough_cut: "Building the first cut",
+  sync_audio: "Aligning audio",
+  analyze_footage: "Analysing the footage",
+  upscale_media: "Upscaling",
+  duck_music: "Ducking the music",
+};
+let jobSeq = 0;
+
 export async function executeTool(ctx: BridgeContext, name: string, rawArgs: Args, source: EditSource): Promise<ToolOut> {
+  const label = LONG_TOOLS[name];
+  if (!label) return await runTool(ctx, name, rawArgs, source);
+  // Already busy: refuse rather than pile a second half-hour transcode on top of the first. They
+  // would not finish sooner, and together they make the machine unusable — which is the whole
+  // failure this is here to prevent.
+  const running = currentJob_();
+  if (running) return fail(`Busy: ${running.label.toLowerCase()}. Wait for it to finish, or stop it first.`);
+  const id = `job_${++jobSeq}`;
+  beginJob(id, name, label);
+  emitProgress(name, `${label}…`);
+  try {
+    const out = await runTool(ctx, name, rawArgs, source);
+    return jobCancelled(id) ? fail("Stopped.") : out;
+  } finally {
+    endJob(id);
+    emitProgress(name, "");
+  }
+}
+
+async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: EditSource): Promise<ToolOut> {
   const args = expandIds(rawArgs ?? {}, idUniverse(ctx.doc)) as Args;
   try {
     switch (name) {

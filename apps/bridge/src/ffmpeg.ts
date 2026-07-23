@@ -1,6 +1,6 @@
 // Media inspection + light processing via the system ffmpeg/ffprobe.
 
-import { rename, rm } from "node:fs/promises";
+import { rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { exportsDir, FFMPEG_BIN, FFPROBE_BIN } from "./config";
 import { addSpawnEnv, run } from "./proc";
@@ -188,6 +188,19 @@ const scrubInFlight = new Map<string, Promise<void>>();
 export function scrubProxyPath(srcPath: string): string {
   return `${srcPath}.scrubv6.mp4`;
 }
+/** Past this, a full-length all-intra proxy costs more than it is worth. Five minutes is roughly
+ * where the encode stops being background noise and starts being a job you notice. */
+const LONG_SOURCE_SECONDS = 300;
+
+async function isLongSource(srcPath: string): Promise<boolean> {
+  try {
+    const { durationSeconds } = await probeMedia(srcPath);
+    return (durationSeconds ?? 0) > LONG_SOURCE_SECONDS;
+  } catch {
+    return false; // unknown duration: behave as before rather than silently skipping the proxy
+  }
+}
+
 /** Ensure an all-intra 480p (no audio) proxy exists for instant per-frame seeking while scrubbing.
  * Generates it in the background on first request; returns the proxy path once it's on disk, else
  * null (callers fall back to the original until it's ready). */
@@ -198,6 +211,15 @@ export async function ensureScrubProxy(srcPath: string, opts: { wait?: boolean }
     if (pf.size > 1024) return proxy; // a complete proxy
     await rm(proxy, { force: true }).catch(() => {}); // stale/partial from an interrupted run → redo
   }
+  // Don't build one at all when it is neither needed nor cheap.
+  //
+  // The proxy buys frame-exact scrubbing, and on a short clip that costs seconds. On a half-hour
+  // camera file it is ~2 minutes of every core and gigabytes written — measured — and TWO of those
+  // at once is what made a machine unusable and the editor report a dead engine. An .mp4 plays in
+  // the webview on its own; the only thing lost is the very smoothest frame-stepping, and that is a
+  // far better trade than freezing the app. Containers the webview CANNOT play still get a proxy at
+  // any length, because there the alternative is a black preview.
+  if (!opts.wait && (await isLongSource(srcPath))) return null;
   // wait=true blocks until the proxy is ready instead of falling back to the original — required
   // for sources the webview can't play natively (.mov/.mkv/ProRes…): serving the original there
   // renders a black preview, so "slow but correct" beats "instant but broken".
@@ -225,6 +247,12 @@ export async function ensureScrubProxy(srcPath: string, opts: { wait?: boolean }
           ? hdrToSdrPlacebo({ w: "-2", h: "'min(720,ih)'" })
           : `scale=-2:min(720\\,ih)${hdr ? `,${hdrToSdr(srcColor)}` : ""}`;
       // -g 1 = every frame a keyframe → a seek decodes exactly one small frame (instant scrub).
+      // A long source only reaches here when the container is unplayable, so the proxy is being
+      // built out of necessity rather than for smoothness: a coarser keyframe spacing writes 14x
+      // less (measured: 2.10 GB → 0.15 GB for half an hour) and seeks are still well under a
+      // second, which is all a half-hour timeline needs.
+      const long = await isLongSource(srcPath);
+      const gop = long ? "24" : "1";
       const { code } = await withTranscodeSlot(() =>
         run(FFMPEG_BIN, [
           "-y",
@@ -240,7 +268,7 @@ export async function ensureScrubProxy(srcPath: string, opts: { wait?: boolean }
           "-crf",
           "24",
           "-g",
-          "1",
+          gop,
           "-pix_fmt",
           "yuv420p",
           "-movflags",
@@ -412,7 +440,10 @@ export async function ensureAudioProxy(srcPath: string): Promise<string | null> 
     if ((await pf.exists()) && pf.size > 512) return proxy;
     const tmp = `${proxy}.tmp`;
     const filterArgs = af ? ["-af", af.replace(/^,/, "")] : [];
-    const { code } = await run(FFMPEG_BIN, ["-y", "-i", srcPath, "-vn", ...filterArgs, ...args, tmp]);
+    // Through the same gate as the other heavy per-file jobs: on a project holding two half-hour
+    // cameras, opening it fired both extractions at once (~23s each, measured on 9.4 GB) and they
+    // fought each other for the disk rather than finishing sooner.
+    const { code } = await withTranscodeSlot(() => run(FFMPEG_BIN, ["-y", "-i", srcPath, "-vn", ...filterArgs, ...args, tmp]));
     if (code === 0 && (await Bun.file(tmp).exists()) && Bun.file(tmp).size > 512) {
       await rename(tmp, proxy);
       return proxy;
@@ -499,6 +530,8 @@ export async function audioEnvelope(
   tag: string,
   envRate = 100,
   sampleRate = 8000,
+  /** Kill tag, so a long extraction can be stopped by the operation that asked for it. */
+  killTag?: string,
 ): Promise<Float32Array | null> {
   // Unique per call: concurrent MCP tool calls (or /waveform requests) with the same tag would
   // otherwise write the same temp file with -y and silently corrupt each other's envelope.
@@ -512,6 +545,12 @@ export async function audioEnvelope(
       String(Math.max(0.05, durSec)),
       "-i",
       path,
+      // -vn: without it ffmpeg still sets up and feeds the video stream while producing an
+      // audio-only output. On a 10 GB camera file that is minutes of wasted work for samples that
+      // are thrown away — the same mistake audioSilences had.
+      "-vn",
+      "-sn",
+      "-dn",
       "-ac",
       "1",
       "-ar",
@@ -519,7 +558,7 @@ export async function audioEnvelope(
       "-f",
       "s16le",
       pcmPath,
-    ]);
+    ], killTag ? { tag: killTag } : {});
     if (code !== 0) return null;
     const f = Bun.file(pcmPath);
     if (!(await f.exists())) return null;
@@ -564,6 +603,11 @@ export async function frameToBase64(path: string, atSeconds: number, maxWidth = 
 
 /** Real, sample-derived waveform peaks (0..1, normalized) for drawing an audio clip. */
 export async function audioPeaks(path: string, durationSec: number, buckets: number): Promise<number[] | null> {
+  // Cached on disk: the peaks are a few hundred numbers, but producing them reads the whole source.
+  // The timeline asks for every audio clip on every project open, so without this a project holding
+  // two half-hour cameras re-reads gigabytes each time it is opened — for a row of little bars.
+  const cached = await readPeaksCache(path, buckets);
+  if (cached) return cached;
   const env = await audioEnvelope(path, 0, durationSec > 0 ? durationSec : 5, "wave", 100, 8000);
   if (!env || env.length === 0) return null;
   const per = Math.max(1, Math.floor(env.length / buckets));
@@ -578,7 +622,38 @@ export async function audioPeaks(path: string, durationSec: number, buckets: num
     out.push(m);
     if (m > max) max = m;
   }
-  return out.map((v) => Math.min(1, v / max));
+  const peaks = out.map((v) => Math.min(1, v / max));
+  void writePeaksCache(path, buckets, peaks);
+  return peaks;
+}
+
+/** Peaks cached beside the media, keyed by the source's size+mtime so an edited file re-measures. */
+interface PeaksCache {
+  mtimeMs: number;
+  size: number;
+  buckets: number;
+  peaks: number[];
+}
+const peaksFileFor = (path: string) => `${path}.peaks.json`;
+
+async function readPeaksCache(path: string, buckets: number): Promise<number[] | null> {
+  try {
+    const src = await stat(path);
+    const c = (await Bun.file(peaksFileFor(path)).json()) as PeaksCache;
+    if (c.mtimeMs !== src.mtimeMs || c.size !== src.size || c.buckets !== buckets) return null;
+    return Array.isArray(c.peaks) && c.peaks.length === buckets ? c.peaks : null;
+  } catch {
+    return null; // absent, stale or unreadable — just measure again
+  }
+}
+
+async function writePeaksCache(path: string, buckets: number, peaks: number[]): Promise<void> {
+  try {
+    const src = await stat(path);
+    await Bun.write(peaksFileFor(path), JSON.stringify({ mtimeMs: src.mtimeMs, size: src.size, buckets, peaks } satisfies PeaksCache));
+  } catch {
+    /* best-effort: without it the next open just costs time again */
+  }
 }
 
 /** Color scopes of an image via ffmpeg signalstats — luma/chroma/saturation/warm-cool, normalized. */

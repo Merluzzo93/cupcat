@@ -13,7 +13,7 @@ import { createFeedbackBundle } from "./feedback";
 import { handleRpc, type RpcMessage } from "./mcp-http";
 import { audioPeaks, ensureAudioProxy, ensureScrubProxy, ensureThumbnail } from "./ffmpeg";
 import { mediaPathFor, saveProject } from "./media";
-import { killTagged, openInBrowser } from "./proc";
+import { cancelJob, currentJob_, killTagged, openInBrowser } from "./proc";
 import { claudeInstalled, installClaudeCode, startClaudeLogin, submitClaudeCode } from "./claude-code";
 import { checkForUpdate } from "./update";
 import { setProgressSink } from "./progress";
@@ -507,6 +507,17 @@ export function startServer(ctx: BridgeContext) {
       // starts a diarization run, so opening a project can't kick off minutes of CPU by itself.
       // What changed since the version the app last ran as. The web shell asks once at start-up
       // and shows the card only when this comes back non-empty, so an ordinary launch is silent.
+      // What long operation is running, and a way to stop it. The editor polls this so a slow
+      // job is visible as work in progress rather than as an app that has stopped responding.
+      if (path === "/jobs") {
+        if (req.method === "POST") {
+          if (!originAllowed(req)) return new Response("Forbidden origin", { status: 403 });
+          const stopped = cancelJob();
+          return Response.json({ stopped }, { headers: cors });
+        }
+        return Response.json({ job: currentJob_() }, { headers: cors });
+      }
+
       if (path === "/changelog") {
         const seen = url.searchParams.get("seen") ?? "";
         return Response.json({ current: CUPCAT_VERSION, entries: seen ? entriesBetween(seen, CUPCAT_VERSION) : [] }, { headers: cors });

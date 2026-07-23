@@ -79,6 +79,69 @@ export function resetAgentStop(): void {
   agentStopping = false;
 }
 
+// ── Named jobs ───────────────────────────────────────────────────────────────
+// The same idea as the agent registry above, but for work started from a BUTTON rather than from
+// the chat: transcribing, diarizing, syncing cameras, repairing audio, exporting clips. These can
+// run for minutes, and until now there was no way to see one running and no way to stop it — a
+// slow operation was indistinguishable from a frozen app.
+//
+// Deliberately one at a time. Two half-hour transcodes at once do not finish sooner; they just make
+// the machine unusable and every one of them slower.
+
+export interface JobInfo {
+  id: string;
+  /** Tool name — the UI translates from this; `label` is the fallback for anything it lacks. */
+  tool: string;
+  label: string;
+  startedAt: number;
+}
+
+interface Job extends JobInfo {
+  procs: Set<Subprocess>;
+  stopping: boolean;
+}
+
+let currentJob: Job | null = null;
+
+/** Start tracking a long operation. Everything run() spawns from here on belongs to it. */
+export function beginJob(id: string, tool: string, label: string): void {
+  currentJob = { id, tool, label, startedAt: Date.now(), procs: new Set(), stopping: false };
+}
+
+/** Finish it. Safe to call for a job that was already cancelled or replaced. */
+export function endJob(id: string): void {
+  if (currentJob?.id === id) currentJob = null;
+}
+
+/** What is running right now, for the UI to show and offer to stop. */
+export function currentJob_(): JobInfo | null {
+  return currentJob ? { id: currentJob.id, tool: currentJob.tool, label: currentJob.label, startedAt: currentJob.startedAt } : null;
+}
+
+/** Stop the running operation: kill what it has spawned, and — stickily — anything it spawns next,
+ * because these tools run a SEQUENCE of subprocesses and killing only the current one lets the work
+ * carry straight on. Returns false when there was nothing to stop. */
+export function cancelJob(id?: string): boolean {
+  if (!currentJob || (id && currentJob.id !== id)) return false;
+  currentJob.stopping = true;
+  for (const p of currentJob.procs) {
+    try {
+      p.kill();
+    } catch {
+      /* already exited */
+    }
+  }
+  currentJob.procs.clear();
+  return true;
+}
+
+/** Has the running operation been asked to stop? Tools check this between steps. */
+export function jobCancelled(id?: string): boolean {
+  if (!currentJob) return false;
+  if (id && currentJob.id !== id) return false;
+  return currentJob.stopping;
+}
+
 export async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string>; tag?: string; stdin?: string } = {}): Promise<RunResult> {
   const needEnv = opts.env || Object.keys(extraEnv).length > 0;
   const proc = Bun.spawn([cmd, ...args], {
@@ -100,6 +163,18 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; env
     // A fresh run invalidates any cancel flag left over from a previous run under this tag,
     // so a cancel that raced a completed export can't mislabel the new one as cancelled.
     killed.delete(opts.tag);
+  }
+  if (currentJob) {
+    currentJob.procs.add(proc);
+    // Same sticky rule as the agent: a stop that landed between two steps must take out the
+    // step that started just after it, or the operation carries on regardless.
+    if (currentJob.stopping) {
+      try {
+        proc.kill();
+      } catch {
+        /* already gone */
+      }
+    }
   }
   if (agentActive) {
     agentProcs.add(proc); // killable by a chat-stop (killAgentProcs)
