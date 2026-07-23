@@ -164,6 +164,33 @@ export function startServer(ctx: BridgeContext) {
     saveTimer = setTimeout(() => void saveProject(ctx.doc.project), 400);
   });
 
+  // Opening a SECOND CupCat while one is already running used to die here with a raw stack
+  // trace: the port is taken, Bun.serve throws, and that window is left with no engine of its
+  // own — it then talks to the first instance's engine, showing that instance's project, or
+  // nothing at all. Say what happened, in words, and stop cleanly.
+  try {
+    return serve(ctx, clients, stateMsg, broadcast, broadcastRaw, broadcastStatus);
+  } catch (e) {
+    // The code is on the error object; the MESSAGE is only "Failed to start server. Is port
+    // N in use?" — matching the message alone missed it, and the raw stack trace came back.
+    const code = (e as { code?: string })?.code ?? "";
+    const msg = e instanceof Error ? e.message : String(e);
+    if (code === "EADDRINUSE" || /EADDRINUSE|already in use|failed to start server/i.test(msg)) {
+      console.error(`CupCat is already running (port ${BRIDGE_PORT} is in use). Close the other window first — this one has no engine of its own.`);
+      process.exit(0);
+    }
+    throw e;
+  }
+}
+
+function serve(
+  ctx: BridgeContext,
+  clients: Set<Sendable>,
+  stateMsg: () => string,
+  broadcast: () => void,
+  broadcastRaw: (obj: unknown) => void,
+  broadcastStatus: () => Promise<void>,
+) {
   return Bun.serve({
     hostname: "127.0.0.1",
     port: BRIDGE_PORT,
