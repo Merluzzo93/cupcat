@@ -14,6 +14,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.15",
+    title: "The Update button works, and a lost connection comes back",
+    points: [
+      "**The Update button downloads again.** It did nothing at all: the desktop window silently ignores requests to open an external link, so the click went nowhere. The engine opens it now.",
+      "**A lost connection recovers by itself.** If a connection attempt hung, it wedged every later attempt — including the Try again button, which is why pressing it did nothing. It now gives up on a stalled attempt and keeps trying, and reconnects on its own the moment the engine answers.",
+      "**The engine sends a heartbeat.** While a long job runs there was nothing to say, so the connection sat silent and could be dropped as idle — the app reported the engine lost while it was working perfectly well.",
+      "**A camera that will not be read no longer hangs a sync.** If reading one takes absurdly long, that camera is reported and the rest carry on.",
+    ],
+  },
+  {
     version: "1.7.14",
     title: "Big files stop bringing the machine to its knees",
     points: [

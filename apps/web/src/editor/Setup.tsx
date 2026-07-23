@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { t } from "./i18n";
-import { dismissUpdate, higgsfieldLogin, useEditor } from "./store";
+import { BRIDGE_HTTP, dismissUpdate, higgsfieldLogin, useEditor } from "./store";
 
 const CLAUDE_CMD = "claude mcp add --transport http cupcat http://127.0.0.1:19789/mcp";
 
@@ -60,12 +60,24 @@ export function UpdateBanner() {
   const { update, updateDismissed } = useEditor();
   if (!update || updateDismissed) return null;
   const url = update.downloadUrl ?? update.releaseUrl ?? undefined;
-  const open = () => {
+  // The engine opens it, not the page. Inside the desktop shell's webview window.open on an
+  // external URL is ignored outright — the button looked like it did nothing at all — and
+  // setting location.href would navigate the EDITOR to the download instead of the browser.
+  const [opening, setOpening] = useState(false);
+  const open = async () => {
     if (!url) return;
+    setOpening(true);
     try {
-      window.open(url, "_blank", "noopener");
+      const r = await fetch(`${BRIDGE_HTTP}/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      }).then((x) => x.json());
+      if (!r?.opened) window.open(url, "_blank", "noopener"); // plain browser: this path works
     } catch {
-      location.href = url;
+      window.open(url, "_blank", "noopener");
+    } finally {
+      setOpening(false);
     }
   };
 
@@ -74,8 +86,8 @@ export function UpdateBanner() {
       <span className="font-semibold">{t("update.title")}</span>
       <span className="text-teal-200/90">{t("update.available", { version: update.latest })}</span>
       {url && (
-        <button onClick={open} className="rounded bg-teal-500 px-2.5 py-1 font-medium text-teal-950 hover:bg-teal-400">
-          {t("update.download")}
+        <button onClick={() => void open()} disabled={opening} className="rounded bg-teal-500 disabled:opacity-60 px-2.5 py-1 font-medium text-teal-950 hover:bg-teal-400">
+          {opening ? t("update.opening") : t("update.download")}
         </button>
       )}
       <div className="ml-auto flex items-center gap-2">

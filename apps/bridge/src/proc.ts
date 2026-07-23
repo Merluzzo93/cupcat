@@ -199,6 +199,9 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; env
     // same tag would otherwise have its registration wiped by the older run's cleanup.
     if (opts.tag && tagged.get(opts.tag) === proc) tagged.delete(opts.tag);
     agentProcs.delete(proc);
+    // Finished processes must leave the job's set too, or a long tool that runs hundreds of
+    // them (one ffmpeg per clip) accumulates dead handles for the whole run.
+    currentJob?.procs.delete(proc);
   }
 }
 

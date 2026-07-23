@@ -103,6 +103,7 @@ const EN = {
   "update.title": "Update",
   "update.available": "CupCat {version} is available. Update for the latest features and fixes.",
   "update.download": "Download the new version",
+  "update.opening": "Opening…",
   "update.dismiss": "Dismiss",
 
   // ── setup banner ──
@@ -573,6 +574,7 @@ const IT: Partial<Record<Key, string>> = {
   "update.title": "Aggiornamento",
   "update.available": "È disponibile CupCat {version}. Aggiorna per avere le ultime novità e correzioni.",
   "update.download": "Scarica la nuova versione",
+  "update.opening": "Apro…",
   "update.dismiss": "Chiudi",
 
   "setup.title": "Configurazione",

@@ -146,6 +146,17 @@ export function startServer(ctx: BridgeContext) {
     }
   };
 
+  // Heartbeat. While a long operation runs there is nothing to broadcast — no document changes,
+  // and phase messages can be minutes apart — so the socket sits completely silent. Something in
+  // that path (the webview, a proxy, an OS idle rule) drops a silent connection, and the editor
+  // then reports the engine lost while the engine is in fact working perfectly well. A tick every
+  // 15s costs nothing and makes an idle-but-alive connection indistinguishable from a busy one,
+  // which it should be.
+  setInterval(() => {
+    if (clients.size === 0) return;
+    broadcastRaw({ type: "ping", t: Date.now(), job: currentJob_() });
+  }, 15000);
+
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   ctx.doc.subscribe(() => {
     broadcast();
@@ -509,6 +520,24 @@ export function startServer(ctx: BridgeContext) {
       // and shows the card only when this comes back non-empty, so an ordinary launch is silent.
       // What long operation is running, and a way to stop it. The editor polls this so a slow
       // job is visible as work in progress rather than as an app that has stopped responding.
+      // Open a link in the SYSTEM browser. The webview ignores window.open for external URLs,
+      // which is why the update button appeared to do nothing at all when pressed.
+      if (path === "/open" && req.method === "POST") {
+        if (!originAllowed(req)) return new Response("Forbidden origin", { status: 403 });
+        let body: { url?: string } = {};
+        try {
+          body = (await req.json()) as { url?: string };
+        } catch {
+          /* fall through to the check below */
+        }
+        const target = String(body.url ?? "");
+        // Only http(s), and never a local path: this endpoint is reachable from the page, so it
+        // must not become a way to launch arbitrary things.
+        if (!/^https:\/\//i.test(target)) return Response.json({ opened: false }, { headers: cors });
+        openInBrowser(target);
+        return Response.json({ opened: true }, { headers: cors });
+      }
+
       if (path === "/jobs") {
         if (req.method === "POST") {
           if (!originAllowed(req)) return new Response("Forbidden origin", { status: 403 });

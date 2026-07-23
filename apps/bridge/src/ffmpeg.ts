@@ -21,7 +21,21 @@ interface FfStream {
   r_frame_rate?: string;
 }
 
+// Probing spawns ffprobe, and the answer cannot change unless the file does. Every preview
+// request asks whether the source is long, so without this a timeline of big files fires a
+// fresh ffprobe per clip per seek — a spawn storm against files that are gigabytes each.
+const probeCache = new Map<string, { mtimeMs: number; size: number; result: ProbeResult }>();
+
 export async function probeMedia(path: string): Promise<ProbeResult> {
+  let key: { mtimeMs: number; size: number } | null = null;
+  try {
+    const st = await stat(path);
+    key = { mtimeMs: st.mtimeMs, size: st.size };
+    const hit = probeCache.get(path);
+    if (hit && hit.mtimeMs === key.mtimeMs && hit.size === key.size) return hit.result;
+  } catch {
+    /* unstattable (a URL, a vanished file) — fall through and let ffprobe answer */
+  }
   const { stdout, code } = await run(FFPROBE_BIN, [
     "-v",
     "quiet",
@@ -47,7 +61,9 @@ export async function probeMedia(path: string): Promise<ProbeResult> {
     const parts = String(v.r_frame_rate).split("/").map(Number);
     if (parts.length === 2 && parts[1]) fps = parts[0]! / parts[1]!;
   }
-  return { durationSeconds, width: v?.width, height: v?.height, fps, hasAudio: !!a };
+  const result: ProbeResult = { durationSeconds, width: v?.width, height: v?.height, fps, hasAudio: !!a };
+  if (key) probeCache.set(path, { ...key, result });
+  return result;
 }
 
 // Heavy transcode jobs (scrub proxy + thumbnail generation — anything that decodes a 4K HDR frame

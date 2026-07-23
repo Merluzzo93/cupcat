@@ -199,13 +199,62 @@ let socket: WebSocket | null = null;
 let connecting = false;
 let statusPoll: ReturnType<typeof setInterval> | null = null;
 
-export function connectBridge(): void {
-  if (typeof window === "undefined" || socket || connecting) return;
+/** Retry, backing off a little so a busy engine isn't hammered, but never giving up. */
+function scheduleReconnect(): void {
+  if (connectTimer) return;
+  attempts++;
+  const wait = Math.min(1500 * attempts, 8000);
+  connectTimer = window.setTimeout(() => {
+    connectTimer = null;
+    connectBridge();
+  }, wait);
+}
+
+let connectTimer: number | null = null;
+let attempts = 0;
+
+/**
+ * Connect, and keep connecting.
+ *
+ * `force` is what the Try again button passes. Without it a hung attempt was fatal: the guard below
+ * returned early forever because `connecting` never went back to false — the socket was stuck
+ * CONNECTING, so neither onopen nor onclose ever fired, the automatic retry no-opped, and pressing
+ * the button did nothing at all. That is now impossible: every attempt is on a timer.
+ */
+export function connectBridge(force = false): void {
+  if (typeof window === "undefined") return;
+  if (force) {
+    // Tear down whatever is half-open before starting again, or the guard rejects the retry.
+    if (connectTimer) clearTimeout(connectTimer);
+    connectTimer = null;
+    try {
+      socket?.close();
+    } catch {
+      /* already gone */
+    }
+    socket = null;
+    connecting = false;
+    attempts = 0;
+  }
+  if (socket || connecting) return;
   connecting = true;
   const sock = new WebSocket(BRIDGE_WS);
+  // A handshake that never completes must not wedge every future attempt. The engine can be too
+  // busy to answer for a while; giving up on THIS attempt and trying again is what recovers.
+  const giveUp = window.setTimeout(() => {
+    try {
+      sock.close();
+    } catch {
+      /* already gone */
+    }
+    connecting = false;
+    scheduleReconnect();
+  }, 8000);
   sock.onopen = () => {
+    window.clearTimeout(giveUp);
     socket = sock;
     connecting = false;
+    attempts = 0;
     setState({ connected: true });
     void fetchAgentStatus();
     void loadChatHistory(); // restore this project's conversation
@@ -214,6 +263,7 @@ export function connectBridge(): void {
     if (!statusPoll) statusPoll = setInterval(() => void fetchAgentStatus(), 25000);
   };
   sock.onclose = () => {
+    window.clearTimeout(giveUp);
     socket = null;
     connecting = false;
     if (statusPoll) {
@@ -221,7 +271,7 @@ export function connectBridge(): void {
       statusPoll = null;
     }
     setState({ connected: false });
-    window.setTimeout(connectBridge, 1500);
+    scheduleReconnect();
   };
   sock.onerror = () => {
     sock.close();
@@ -257,6 +307,9 @@ export function connectBridge(): void {
         // browser, we open it here too and reveal the code box (the login now waits for the code).
         setState({ claudeLoginUrl: msg.url, claudeLoginBusy: false, claudeCodeNeeded: true });
         try { window.open(msg.url, "_blank", "noopener"); } catch {}
+      } else if (msg.type === "ping") {
+        // Proof of life while a long job runs. Nothing to do with it beyond having received
+        // it: the traffic itself is what stops a silent socket being treated as a dead one.
       } else if (msg.type === "tool-progress" && typeof msg.text === "string") {
         setState({ toolProgress: { tool: String(msg.tool ?? ""), text: msg.text } });
       } else if (msg.type === "claude-login-progress" && typeof msg.text === "string") {

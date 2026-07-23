@@ -2500,6 +2500,28 @@ async function syncAudio(doc: EditorDocument, args: Args): Promise<ToolOut> {
 }
 
 const SYNC_TAG = "sync_cameras";
+/** Reading a few minutes of audio should take seconds; five minutes means something is wrong
+ * with the file or the drive, not that patience will help. */
+const PROBE_TIMEOUT_MS = 5 * 60 * 1000;
+const TIMED_OUT = Symbol("timed out");
+
+/** Resolve `p`, or TIMED_OUT after `ms` — running `onTimeout` so the work actually stops. */
+async function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => void): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race<T | typeof TIMED_OUT>([
+      p,
+      new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => {
+          onTimeout();
+          resolve(TIMED_OUT);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /**
  * sync_cameras — take several recordings of the SAME moment and lay them out already lined up.
@@ -2553,7 +2575,12 @@ async function runSyncCameras(ctx: BridgeContext, args: Args): Promise<ToolOut> 
   const probe = probeSeconds(searchWindow, Number.isFinite(shortest) ? shortest : searchWindow * 6);
 
   emitProgress("sync_cameras", `Listening to ${cams.length} cameras (${Math.round(probe)}s of each)…`);
-  const refEnv = await audioEnvelope(refCam.url!, 0, probe, "camref", ENV_RATE, 8000, SYNC_TAG);
+  const refEnv = await withTimeout(
+    audioEnvelope(refCam.url!, 0, probe, "camref", ENV_RATE, 8000, SYNC_TAG),
+    PROBE_TIMEOUT_MS,
+    () => killTagged(SYNC_TAG),
+  );
+  if (refEnv === TIMED_OUT) return fail(`Reading the sound of "${refCam.name}" took too long — it is the reference, so nothing can be lined up to it.`);
   if (!refEnv || refEnv.length < ENV_RATE) return fail(`Could not read the sound of "${refCam.name}" — it is the reference, so nothing can be lined up to it.`);
 
   const measured: { id: string; lagSamples: number | null; durationFrames: number; confidence?: number; note?: string }[] = [];
@@ -2565,7 +2592,18 @@ async function runSyncCameras(ctx: BridgeContext, args: Args): Promise<ToolOut> 
     }
     if (jobCancelled()) return fail("Stopped. Nothing was changed.");
     emitProgress("sync_cameras", `Listening to "${cam.name}"…`);
-    const env = await audioEnvelope(cam.url!, 0, probe, `cam${done++}`, ENV_RATE, 8000, SYNC_TAG);
+    // Bounded. A camera whose container makes ffmpeg crawl (an index at the far end of a 10 GB
+    // file, a drive that stalls) must not hang the whole operation with no way out — the user
+    // gets told which camera refused rather than watching a bar that never moves.
+    const env = await withTimeout(
+      audioEnvelope(cam.url!, 0, probe, `cam${done++}`, ENV_RATE, 8000, SYNC_TAG),
+      PROBE_TIMEOUT_MS,
+      () => killTagged(SYNC_TAG),
+    );
+    if (env === TIMED_OUT) {
+      measured.push({ id: cam.id, lagSamples: null, durationFrames: durFrames(cam), note: "took too long to read — placed unaligned" });
+      continue;
+    }
     if (!env || env.length < ENV_RATE) {
       measured.push({ id: cam.id, lagSamples: null, durationFrames: durFrames(cam), note: "no usable sound" });
       continue;
