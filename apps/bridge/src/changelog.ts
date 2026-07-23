@@ -14,6 +14,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.14",
+    title: "Big files stop bringing the machine to its knees",
+    points: [
+      "**Syncing two long cameras is now seconds instead of minutes.** Two half-hour recordings used to make CupCat unusable and eventually lose contact with its own engine. It reads only as much audio as the answer needs, and the matching itself went from 6.6 seconds of a frozen app to a tenth of a second — with exactly the same result.",
+      "**Long videos no longer trigger a huge hidden re-encode.** Dropping a half-hour file on the timeline quietly started a job that used every core for over two minutes and wrote gigabytes, twice over for two files. It is simply not done any more for videos that already play.",
+      "**You can see what is working, and stop it.** Anything that takes a while — transcribing, finding speakers, repairing audio, making clips — now shows a bar with its name, how long it has been going, and a Stop button that really stops it.",
+      "**One heavy job at a time.** Starting a second one while the first is still going is refused, with a message saying what is running.",
+      "**Waveforms are remembered** instead of being recomputed from the whole file every time you open a project.",
+      "**If contact with the engine is lost**, the message now offers Try again and Reload instead of leaving you stuck.",
+    ],
+  },
+  {
     version: "1.7.13",
     title: "Several cameras, and who is speaking",
     points: [
