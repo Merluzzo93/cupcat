@@ -51,7 +51,7 @@ import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "
 import { startRecording, stopRecording } from "./recorder";
 import { multicamCut } from "./multicam";
 import { offsetLabel, pickReference, planAnglePlacements } from "./synccam";
-import { findLag, probeSeconds } from "./align";
+import { findLag, syncProbePlan } from "./align";
 import { assignPieces, sourceToTimeline, speakerOrder, splitFramesForTurns } from "./speakerplan";
 import { framingFor, isConfident, mouthRegion, rankSpeakers, regionMotion } from "./emphasis";
 import { OPENERS, planOpener, rippleRight } from "./openers";
@@ -2564,24 +2564,23 @@ async function runSyncCameras(ctx: BridgeContext, args: Args): Promise<ToolOut> 
   if (!refId) return fail(`referenceRef is not one of the cameras: ${explicitRef}`);
   const refCam = cams.find((c) => c.id === refId)!;
 
-  const searchWindow = numOpt(args.searchWindowSeconds) ?? 30;
   const minConf = numOpt(args.minConfidence) ?? 0.5;
-  const lagLimit = Math.round(searchWindow * ENV_RATE);
-
-  // Only listen to as much as the answer needs. Reading two half-hour cameras end to end costs
-  // gigabytes and minutes; a few minutes of their shared audio decides an offset of a few seconds
-  // just as well. Measured on a 9.4 GB camera: 2.25 GB read → 0.24 GB.
+  const userWindow = numOpt(args.searchWindowSeconds);
   const shortest = Math.min(...cams.map((c) => c.durationSeconds ?? 0).filter((d) => d > 0), Infinity);
-  const probe = probeSeconds(searchWindow, Number.isFinite(shortest) ? shortest : searchWindow * 6);
+  const shortestDur = Number.isFinite(shortest) ? shortest : (userWindow ?? 120) * 6;
 
-  emitProgress("sync_cameras", `Listening to ${cams.length} cameras (${Math.round(probe)}s of each)…`);
-  const refEnv = await withTimeout(
-    audioEnvelope(refCam.url!, 0, probe, "camref", ENV_RATE, 8000, SYNC_TAG),
-    PROBE_TIMEOUT_MS,
-    () => killTagged(SYNC_TAG),
-  );
-  if (refEnv === TIMED_OUT) return fail(`Reading the sound of "${refCam.name}" took too long — it is the reference, so nothing can be lined up to it.`);
-  if (!refEnv || refEnv.length < ENV_RATE) return fail(`Could not read the sound of "${refCam.name}" — it is the reference, so nothing can be lined up to it.`);
+  // Envelopes cached per (asset, probe length) so escalating the search does not re-read audio it
+  // already has, and the reference is read once per probe size rather than once per camera.
+  const envCache = new Map<string, Float32Array | null>();
+  const readEnv = async (cam: MediaAsset, probe: number, tag: string): Promise<Float32Array | null> => {
+    const key = `${cam.id}@${Math.round(probe)}`;
+    const had = envCache.get(key);
+    if (had !== undefined) return had;
+    const e = await withTimeout(audioEnvelope(cam.url!, 0, probe, tag, ENV_RATE, 8000, SYNC_TAG), PROBE_TIMEOUT_MS, () => killTagged(SYNC_TAG));
+    const val = e === TIMED_OUT || !e || e.length < ENV_RATE ? null : e;
+    envCache.set(key, val);
+    return val;
+  };
 
   const measured: { id: string; lagSamples: number | null; durationFrames: number; confidence?: number; note?: string }[] = [];
   let done = 0;
@@ -2591,35 +2590,38 @@ async function runSyncCameras(ctx: BridgeContext, args: Args): Promise<ToolOut> 
       continue;
     }
     if (jobCancelled()) return fail("Stopped. Nothing was changed.");
-    emitProgress("sync_cameras", `Listening to "${cam.name}"…`);
-    // Bounded. A camera whose container makes ffmpeg crawl (an index at the far end of a 10 GB
-    // file, a drive that stalls) must not hang the whole operation with no way out — the user
-    // gets told which camera refused rather than watching a bar that never moves.
-    const env = await withTimeout(
-      audioEnvelope(cam.url!, 0, probe, `cam${done++}`, ENV_RATE, 8000, SYNC_TAG),
-      PROBE_TIMEOUT_MS,
-      () => killTagged(SYNC_TAG),
-    );
-    if (env === TIMED_OUT) {
-      measured.push({ id: cam.id, lagSamples: null, durationFrames: durFrames(cam), note: "took too long to read — placed unaligned" });
-      continue;
+
+    // Escalate: start with a few minutes and a wide window, and only read more of the files if the
+    // match is weak. The common case (cameras seconds apart) resolves on the first, cheapest pass;
+    // cameras minutes apart escalate up to most of the shorter recording before being given up on.
+    let best: { lag: number; confidence: number } | null = null;
+    let note: string | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const plan = syncProbePlan(shortestDur, userWindow, attempt);
+      emitProgress("sync_cameras", `Listening to "${cam.name}" (${Math.round(plan.probe)}s)…`);
+      const refEnv = await readEnv(refCam, plan.probe, "camref");
+      if (!refEnv) return fail(`Could not read the sound of "${refCam.name}" — it is the reference, so nothing can be lined up to it.`);
+      const env = await readEnv(cam, plan.probe, `cam${done}`);
+      if (!env) {
+        note = "no usable sound";
+        break;
+      }
+      emitProgress("sync_cameras", `Matching "${cam.name}" against "${refCam.name}"…`);
+      // Hand the event loop back before the arithmetic so the heartbeat keeps flowing.
+      await new Promise((r) => setTimeout(r, 0));
+      const lim = Math.round(plan.window * ENV_RATE);
+      const r = findLag(refEnv, env, -lim, lim);
+      if (!best || r.confidence > best.confidence) best = r;
+      if (r.confidence >= minConf || plan.probe >= shortestDur) break;
     }
-    if (!env || env.length < ENV_RATE) {
-      measured.push({ id: cam.id, lagSamples: null, durationFrames: durFrames(cam), note: "no usable sound" });
-      continue;
-    }
-    emitProgress("sync_cameras", `Matching "${cam.name}" against "${refCam.name}"…`);
-    // Hand the event loop back before the arithmetic: the WebSocket that tells the editor the
-    // engine is alive lives on this same thread.
-    await new Promise((r) => setTimeout(r, 0));
-    const { lag, confidence } = findLag(refEnv, env, -lagLimit, lagLimit);
-    const ok = confidence >= minConf;
+    done++;
+    const ok = !!best && best.confidence >= minConf;
     measured.push({
       id: cam.id,
-      lagSamples: ok ? lag : null,
+      lagSamples: ok ? best!.lag : null,
       durationFrames: durFrames(cam),
-      confidence: Math.round(confidence * 100) / 100,
-      ...(ok ? {} : { note: "sound did not match well enough — placed unaligned" }),
+      confidence: best ? Math.round(best.confidence * 100) / 100 : 0,
+      ...(ok ? {} : { note: note ?? "sound did not match well enough — placed unaligned" }),
     });
     emitProgress("sync_cameras", `Lined up ${measured.length}/${cams.length}…`);
   }

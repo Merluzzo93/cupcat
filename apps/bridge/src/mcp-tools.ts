@@ -1139,7 +1139,7 @@ export const TOOL_DEFS: ToolDef[] = [
         mediaRefs: { type: "array", items: { type: "string" }, description: "2-8 video asset ids or names from get_media — one per camera." },
         referenceRef: { type: "string", description: "Camera the others line up to (default: the longest, most likely to overlap the rest)." },
         keepAudio: { type: "string", enum: ["reference", "all"], description: "'reference' (default) silences the duplicate sound on the other cameras; 'all' keeps every track audible." },
-        searchWindowSeconds: { type: "number", description: "How far apart the cameras might have started rolling, in seconds (default 30)." },
+        searchWindowSeconds: { type: "number", description: "How far apart the cameras might have started rolling, in seconds. Omit to search adaptively — a wide window that widens further on a weak match, covering cameras started several minutes apart. Set it only to constrain the search." },
         minConfidence: { type: "number", description: "Minimum match confidence 0..1 (default 0.5). Below it the camera is placed unaligned and flagged." },
       },
       ["mediaRefs"],

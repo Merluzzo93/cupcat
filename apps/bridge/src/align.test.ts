@@ -3,7 +3,7 @@
 // machine and made the editor look dead.
 
 import { describe, expect, it } from "bun:test";
-import { decimate, findLag, probeSeconds, scanLags } from "./align";
+import { decimate, findLag, probeSeconds, scanLags, syncProbePlan } from "./align";
 
 const ENV = 100;
 
@@ -128,3 +128,45 @@ describe("probeSeconds", () => {
     expect(probeSeconds(30, 0)).toBeGreaterThan(0);
   });
 });
+
+describe("syncProbePlan", () => {
+  it("searches wide by default — the fixed ±30s window was the bug that lost real footage", () => {
+    // A camera started ~55s before the other has an offset outside ±30s; the default must reach it.
+    const p = syncProbePlan(1790, undefined, 0);
+    expect(p.window).toBeGreaterThan(60);
+    expect(p.probe).toBeGreaterThan(p.window); // always more audio than the search span
+  });
+
+  it("keeps a real overlap margin so an edge peak can't win", () => {
+    const p = syncProbePlan(1790, undefined, 0);
+    expect(p.probe - p.window).toBeGreaterThanOrEqual(p.probe * 0.25);
+  });
+
+  it("escalates: reads more of the file and searches wider on later attempts", () => {
+    const a0 = syncProbePlan(1790, undefined, 0);
+    const a1 = syncProbePlan(1790, undefined, 1);
+    const a2 = syncProbePlan(1790, undefined, 2);
+    expect(a1.probe).toBeGreaterThan(a0.probe);
+    expect(a2.probe).toBeGreaterThanOrEqual(a1.probe);
+    expect(a1.window).toBeGreaterThan(a0.window);
+  });
+
+  it("never reads past the shorter recording", () => {
+    for (const attempt of [0, 1, 2]) {
+      expect(syncProbePlan(120, undefined, attempt).probe).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it("honours an explicit window but still reads enough audio around it", () => {
+    const p = syncProbePlan(1790, 45, 0);
+    expect(p.window).toBeLessThanOrEqual(45);
+    expect(p.probe).toBeGreaterThan(p.window);
+  });
+
+  it("copes with a nonsense duration instead of producing a negative window", () => {
+    const p = syncProbePlan(0, undefined, 0);
+    expect(p.probe).toBeGreaterThan(0);
+    expect(p.window).toBeGreaterThan(0);
+  });
+})
+

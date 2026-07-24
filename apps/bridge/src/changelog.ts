@@ -14,6 +14,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.16",
+    title: "The engine restarts itself, and sync handles cameras minutes apart",
+    points: [
+      "**If the engine ever stops, it now comes back on its own.** The app used to be left alive but engine-less — Try again only reconnected to something that was gone, and Reload just refreshed the page. The desktop app now watches the engine and restarts it, and the window reconnects by itself.",
+      "**Only one CupCat window now.** Opening it again focuses the window already open, instead of a second window quietly borrowing the first one’s engine and then losing it.",
+      "**Syncing cameras that started far apart now works.** The old search only looked within 30 seconds; real footage where one camera rolled nearly a minute before the other could not be matched. It now searches wide and widens further if the match is weak — verified on two 30-minute cameras 56 seconds apart.",
+      "**One bad file can no longer take the engine down** — an error in a single operation is logged and the engine keeps running, and a crash log is now kept for diagnosis.",
+    ],
+  },
+  {
     version: "1.7.15",
     title: "The Update button works, and a lost connection comes back",
     points: [

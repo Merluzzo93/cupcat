@@ -134,3 +134,35 @@ export function probeSeconds(searchWindowSeconds: number, durationSeconds: numbe
   const wanted = Math.max(180, searchWindowSeconds * 6);
   return Math.max(1, Math.min(wanted, durationSeconds));
 }
+
+export interface SyncProbePlan {
+  /** How many seconds of audio to read from each camera. */
+  probe: number;
+  /** How far apart the cameras may have started, in seconds — the lag range searched. */
+  window: number;
+}
+
+/**
+ * How much audio to read, and how wide to search, to line two cameras up.
+ *
+ * The old fixed +/-30s window was the whole bug: real footage where one camera started nearly a
+ * minute before the other simply could not be matched, because the true offset sat outside the
+ * window and the search settled on a meaningless edge peak. Reading audio is cheap even on a 26 GB
+ * file (it is a few seconds — the video is never touched), so the default is now generous enough to
+ * cover cameras started minutes apart, and coarse-to-fine keeps the wide search fast.
+ *
+ * `attempt` escalates on a poor match: read more of each file and search wider, up to most of the
+ * shorter recording, before giving up on a camera.
+ */
+export function syncProbePlan(shortestSeconds: number, userWindow: number | undefined, attempt = 0): SyncProbePlan {
+  const dur = shortestSeconds > 0 ? shortestSeconds : 600;
+  // How much audio to read — never more than the shorter recording holds, and at least a few
+  // seconds so there is something to correlate.
+  const targetByAttempt = userWindow && userWindow > 0 && attempt === 0 ? userWindow * 3 : [420, 1200, dur][Math.min(attempt, 2)]!;
+  const probe = Math.min(dur, Math.max(30, targetByAttempt));
+  // Search up to 70% of what we read: that leaves a 30% overlap floor at the widest offset, well
+  // above the correlation's own 15% guard, so an edge peak on barely-overlapping audio can't win.
+  const auto = Math.max(15, Math.min(probe - 30, probe * 0.7));
+  const window = userWindow && userWindow > 0 && attempt === 0 ? Math.min(userWindow, Math.max(15, probe - 30)) : auto;
+  return { probe, window };
+}

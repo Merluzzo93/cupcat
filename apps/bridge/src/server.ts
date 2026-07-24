@@ -176,8 +176,11 @@ export function startServer(ctx: BridgeContext) {
     const code = (e as { code?: string })?.code ?? "";
     const msg = e instanceof Error ? e.message : String(e);
     if (code === "EADDRINUSE" || /EADDRINUSE|already in use|failed to start server/i.test(msg)) {
-      console.error(`CupCat is already running (port ${BRIDGE_PORT} is in use). Close the other window first — this one has no engine of its own.`);
-      process.exit(0);
+      // Exit code 3, not 0: the desktop shell's supervisor tells "port already taken" apart from a
+      // clean shutdown, so it can wait and retry (taking over if a stale engine from a previous run
+      // frees the port) rather than treating it as a normal exit.
+      console.error(`CupCat's engine port ${BRIDGE_PORT} is already in use (another instance or a stale engine). Not starting a second one.`);
+      process.exit(3);
     }
     throw e;
   }

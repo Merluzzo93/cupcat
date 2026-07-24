@@ -11,6 +11,17 @@ import { ensureDirs, loadProject } from "./media";
 import { runCli } from "./cli";
 import { startServer } from "./server";
 
+// The engine must outlive any single bad operation. One tool throwing — a malformed file, an
+// ffmpeg that dies oddly, a rejected promise nobody awaited — used to be able to take down the whole
+// process, and with it every other project and the connection to the UI. Log it and keep serving;
+// the desktop shell now also restarts the engine if it ever does die, but not dying is better.
+process.on("uncaughtException", (err) => {
+  console.error("[bridge] uncaught exception (kept alive):", err instanceof Error ? err.stack : err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[bridge] unhandled rejection (kept alive):", reason instanceof Error ? reason.stack : reason);
+});
+
 // Headless subcommands short-circuit the server. `--` guards against a stray flag being read as a
 // verb; anything else falls through to the normal server boot below.
 const verb = process.argv[2];
