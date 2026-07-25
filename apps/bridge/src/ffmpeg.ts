@@ -217,6 +217,50 @@ async function isLongSource(srcPath: string): Promise<boolean> {
   }
 }
 
+/**
+ * Above this, a file must never be handed to the preview as-is.
+ *
+ * Playing an original in the preview means the whole file is pulled through the engine in range
+ * requests. On the two camera files this was measured on (19.8 GB and 28.3 GB of 4K at ~90 Mbit/s)
+ * that walked the engine's memory up by gigabytes per request until Bun aborted with "ran out of
+ * memory" — the engine vanished, the picture went black, and the app reported lost contact. A
+ * proxy of the same footage is ~115 MB and plays instantly, which is why every editor works this
+ * way. One gigabyte is far above anything that behaved badly and far below the files that did.
+ */
+const HEAVY_SOURCE_BYTES = 1024 * 1024 * 1024;
+
+/** Is this a file the preview must not stream directly? */
+export function isHeavySource(srcPath: string): boolean {
+  try {
+    return Bun.file(srcPath).size > HEAVY_SOURCE_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+/** Where a source's preview stands: playable now, still being prepared, or fine to play directly. */
+export type PreviewState = "ready" | "building" | "direct";
+const proxyPercent = new Map<string, number>();
+type ProxyWatcher = (srcPath: string, state: PreviewState, percent: number) => void;
+let proxyWatcher: ProxyWatcher | null = null;
+/** The server installs this once so proxy progress reaches the editor. */
+export function setProxyWatcher(fn: ProxyWatcher | null): void {
+  proxyWatcher = fn;
+}
+function reportProxy(srcPath: string, state: PreviewState, percent: number): void {
+  if (state === "building") proxyPercent.set(srcPath, percent);
+  else proxyPercent.delete(srcPath);
+  try {
+    proxyWatcher?.(srcPath, state, percent);
+  } catch {
+    /* a listener must never break an encode */
+  }
+}
+/** How far along a proxy build is, 0..1 (0 when nothing is building for this source). */
+export function proxyProgress(srcPath: string): number {
+  return proxyPercent.get(srcPath) ?? 0;
+}
+
 /** Ensure an all-intra 480p (no audio) proxy exists for instant per-frame seeking while scrubbing.
  * Generates it in the background on first request; returns the proxy path once it's on disk, else
  * null (callers fall back to the original until it's ready). */
@@ -227,15 +271,11 @@ export async function ensureScrubProxy(srcPath: string, opts: { wait?: boolean }
     if (pf.size > 1024) return proxy; // a complete proxy
     await rm(proxy, { force: true }).catch(() => {}); // stale/partial from an interrupted run → redo
   }
-  // Don't build one at all when it is neither needed nor cheap.
-  //
-  // The proxy buys frame-exact scrubbing, and on a short clip that costs seconds. On a half-hour
-  // camera file it is ~2 minutes of every core and gigabytes written — measured — and TWO of those
-  // at once is what made a machine unusable and the editor report a dead engine. An .mp4 plays in
-  // the webview on its own; the only thing lost is the very smoothest frame-stepping, and that is a
-  // far better trade than freezing the app. Containers the webview CANNOT play still get a proxy at
-  // any length, because there the alternative is a black preview.
-  if (!opts.wait && (await isLongSource(srcPath))) return null;
+  // Long sources used to be skipped here, on the reasoning that an .mp4 plays in the webview by
+  // itself. It does — but only for files small enough to stream. Handing the preview a 19.8 GB
+  // original instead killed the engine outright (see HEAVY_SOURCE_BYTES), so a heavy source now
+  // always gets a proxy. It is built in the background with visible progress; until it is ready the
+  // editor shows the clip's poster frame rather than trying to play the original.
   // wait=true blocks until the proxy is ready instead of falling back to the original — required
   // for sources the webview can't play natively (.mov/.mkv/ProRes…): serving the original there
   // renders a black preview, so "slow but correct" beats "instant but broken".
@@ -269,30 +309,49 @@ export async function ensureScrubProxy(srcPath: string, opts: { wait?: boolean }
       // second, which is all a half-hour timeline needs.
       const long = await isLongSource(srcPath);
       const gop = long ? "24" : "1";
+      // Progress is worth having on a long source: the encode is disk-bound (measured on this
+      // footage: 60s of 4K takes ~11.6s, almost all of it reading and decoding), so half an hour
+      // of camera file is minutes of waiting. Silence there reads as a hung app.
+      const totalSeconds = (await probeMedia(srcPath).catch(() => ({ durationSeconds: 0 }))).durationSeconds ?? 0;
+      if (long) reportProxy(srcPath, "building", 0);
       const { code } = await withTranscodeSlot(() =>
-        run(FFMPEG_BIN, [
-          "-y",
-          "-i",
-          srcPath,
-          "-an",
-          "-vf",
-          vf,
-          "-c:v",
-          "libx264",
-          "-preset",
-          "veryfast",
-          "-crf",
-          "24",
-          "-g",
-          gop,
-          "-pix_fmt",
-          "yuv420p",
-          "-movflags",
-          "+faststart",
-          "-f", // the temp name ends in .tmp, so force the muxer instead of inferring from extension
-          "mp4",
-          tmp,
-        ]),
+        run(
+          FFMPEG_BIN,
+          [
+            "-y",
+            "-i",
+            srcPath,
+            "-an",
+            "-vf",
+            vf,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "24",
+            "-g",
+            gop,
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-progress", // machine-readable progress on stdout; -nostats silences the human version
+            "pipe:1",
+            "-nostats",
+            "-f", // the temp name ends in .tmp, so force the muxer instead of inferring from extension
+            "mp4",
+            tmp,
+          ],
+          long && totalSeconds > 0
+            ? {
+                onStdout: (line) => {
+                  const m = /^out_time_us=(\d+)/.exec(line);
+                  if (m) reportProxy(srcPath, "building", Math.min(0.999, Number(m[1]) / 1e6 / totalSeconds));
+                },
+              }
+            : {},
+        ),
       );
       if (code === 0 && (await Bun.file(tmp).exists())) await rename(tmp, proxy);
       else {
@@ -303,6 +362,8 @@ export async function ensureScrubProxy(srcPath: string, opts: { wait?: boolean }
       await rm(tmp, { force: true }).catch(() => {});
     } finally {
       scrubInFlight.delete(proxy);
+      // Either way the wait is over: tell the editor to stop showing "preparing" and try the clip.
+      reportProxy(srcPath, (await Bun.file(proxy).exists()) ? "ready" : "direct", 1);
     }
   })();
   scrubInFlight.set(proxy, job);

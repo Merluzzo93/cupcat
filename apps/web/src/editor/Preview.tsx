@@ -6,6 +6,7 @@ import { lerpAnimPair, lerpNumber, sampleTrack, scaledLook, splitStyleSegments, 
 import { BRIDGE_HTTP, mediaUrl, sendCommand, ui, useEditor } from "./store";
 import { canvasToClip, clipToCanvas, maskImageCss } from "./maskPen";
 import { ChromaKeyCanvas, hasWebGL2 } from "./ChromaKeyLayer";
+import { anglesAt, AnglesPanel } from "./Angles";
 
 /** Tiny stable hash of a JSON-able value (djb2). Used as the compound-bake cache-buster: the
  * <video> src changes exactly when the nested timeline changed, forcing a reload of the fresh bake. */
@@ -293,6 +294,10 @@ function VideoLayer({
   videoElRef?: (el: HTMLVideoElement | null) => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  // A heavy camera file has no playable copy yet while its preview is being prepared. Trying to
+  // play the original instead is what used to take the engine down, so this shows the clip's own
+  // poster frame and how far the preparation has got, and asks the engine for nothing.
+  const prep = useEditor().previewStatus[assetId];
   // Heavy/non-mp4 sources (a 100 MB .mov) block on the bridge while their playable proxy is being
   // generated — without feedback that reads as "broken". Show a loading veil until data arrives.
   // A decode/load ERROR (failed proxy → the raw source got served) is retried with backoff — the
@@ -374,6 +379,20 @@ function VideoLayer({
       if (Math.abs(v.currentTime - sourceSeconds) > 0.02) v.currentTime = sourceSeconds;
     }
   }, [sourceSeconds, playing]);
+  if (prep) {
+    return (
+      <div style={style} className="flex items-center justify-center overflow-hidden bg-neutral-900">
+        <img src={`${mediaUrl(assetId)}?thumb=1`} alt="" className="absolute inset-0 h-full w-full object-cover opacity-40" />
+        <div className="relative flex w-40 flex-col items-center gap-2 text-center">
+          <div className="text-[11px] text-neutral-200">{t("preview.preparing")}</div>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-neutral-700">
+            <div className="h-full rounded-full bg-teal-400 transition-[width]" style={{ width: `${Math.round(prep.percent * 100)}%` }} />
+          </div>
+          <div className="text-[10px] text-neutral-400">{Math.round(prep.percent * 100)}%</div>
+        </div>
+      </div>
+    );
+  }
   return (
     <>
       <video
@@ -1527,6 +1546,12 @@ export function Preview() {
   // The active view derives from the tab strip above the monitor: a source tab → source view,
   // the Timeline tab → program view. No separate toggle state to keep in sync.
   const viewMode: "program" | "source" = sourceAssetId ? "source" : "program";
+  // Multicam: how many cameras cover this instant, and whether the user is looking at them.
+  const angleCount = anglesAt(project, playhead).length;
+  const [anglesOpen, setAnglesOpen] = useState(false);
+  useEffect(() => {
+    if (angleCount < 2) setAnglesOpen(false); // the tab it lives on is gone
+  }, [angleCount]);
 
   // Real-time playback advance. The last visible frame is total-1 (clip ranges are end-exclusive);
   // stopping there keeps the final frame on screen instead of parking the playhead one frame past
@@ -1619,7 +1644,12 @@ export function Preview() {
 
       {/* Palmier-style view tabs: Timeline first, then one tab per open source asset */}
       <div className="flex h-8 shrink-0 items-stretch gap-0.5 overflow-x-auto border-b border-neutral-800 bg-neutral-900/60 px-2 [scrollbar-width:none]">
-        <ViewTab active={!sourceAssetId} label={t("timeline.title")} onClick={() => ui.showTimelineTab()} />
+        <ViewTab active={!sourceAssetId && !anglesOpen} label={t("timeline.title")} onClick={() => { setAnglesOpen(false); ui.showTimelineTab(); }} />
+        {/* Angles appears only when two or more cameras actually cover the playhead — an editor with
+          * one camera should never see a multicam tab. */}
+        {angleCount > 1 && (
+          <ViewTab active={anglesOpen} label={`${t("angles.tab")} (${angleCount})`} onClick={() => setAnglesOpen(true)} />
+        )}
         {openSourceIds.map((id) => {
           const a = project?.media.find((m) => m.id === id);
           return (
@@ -1673,7 +1703,9 @@ export function Preview() {
           onDoubleClick={viewMode === "program" ? handleCanvasDblClick : undefined}
         >
           {/* Source viewer overlay */}
-          {sourceAssetId && viewMode === "source" ? (
+          {anglesOpen ? (
+            <AnglesPanel />
+          ) : sourceAssetId && viewMode === "source" ? (
             <SourceViewer assetId={sourceAssetId} />
           ) : (
             <>

@@ -22,6 +22,26 @@ const BRIDGE_ORIGIN =
 export const BRIDGE_HTTP = BRIDGE_ORIGIN;
 export const BRIDGE_WS = `${BRIDGE_ORIGIN.replace(/^http/, "ws")}/ws`;
 
+// The assistant model and effort the user picked, remembered across restarts — choosing Opus every
+// morning is not a choice, it is a chore.
+const MODEL_KEY = "cupcat.chatModel";
+const EFFORT_KEY = "cupcat.chatEffort";
+function loadChoice(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+function saveChoice(key: string, value: string): void {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* private mode: the choice simply doesn't persist */
+  }
+}
+
 export function mediaUrl(assetId: string): string {
   return `${BRIDGE_HTTP}/media/${encodeURIComponent(assetId)}`;
 }
@@ -37,9 +57,18 @@ export interface ChatTurn {
   tools?: ChatTool[];
   limitHit?: boolean; // turn ended on the tool-loop budget — offer one-click Continue
 }
+/** How hard the assistant is asked to think. Only levels the chosen model supports are offered. */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** A model the signed-in Claude account can use, as the bridge read it from the Models API — the
+ * list is never hardcoded, so a model released after this build appears on its own. */
 export interface ChatModel {
   id: string;
   label: string;
+  contextTokens?: number; // input window: what "1M context" in the picker refers to
+  maxOutput?: number;
+  effortLevels?: EffortLevel[]; // empty/absent → this model has no effort control
+  adaptiveThinking?: boolean;
 }
 
 /** Bottom-right activity toast — raised for project changes NOT originated by this window. */
@@ -80,10 +109,14 @@ export interface EditorState {
   activeChatId: string;
   chatBusy: boolean;
   busyChatId: string; // conversation a run is streaming into (may differ from the viewed one)
-  chatModel: string;
+  chatModel: string; // "" until the account's models are known — then the bridge's default
+  chatEffort: EffortLevel | ""; // "" = leave it to the model (the API's own default)
   agentHasKey: boolean; // Claude connected (subscription OAuth or key)
   claudeExpiresAt: number | null; // Claude OAuth token expiry (ms epoch)
   agentModels: ChatModel[];
+  /** Heavy sources whose light preview copy is still being made: assetId → how far along. A clip
+   * listed here cannot be played yet, so it shows its poster frame and the progress instead. */
+  previewStatus: Record<string, { state: "building"; percent: number }>;
   // editor extras
   clipboard: Clip[]; // copied/cut clip objects (full fidelity)
   panels: { chat: boolean; media: boolean; inspector: boolean };
@@ -125,10 +158,14 @@ let state: EditorState = {
   activeChatId: "",
   chatBusy: false,
   busyChatId: "",
-  chatModel: "claude-opus-4-8",
+  // Empty on purpose: the model is chosen from what the account actually has (see
+  // fetchAgentStatus), not pinned to whichever id happened to be current when this shipped.
+  chatModel: loadChoice(MODEL_KEY),
+  chatEffort: loadChoice(EFFORT_KEY) as EffortLevel | "",
   agentHasKey: false,
   claudeExpiresAt: null,
   agentModels: [],
+  previewStatus: {},
   clipboard: [],
   panels: { chat: true, media: true, inspector: true },
   maximized: null,
@@ -312,6 +349,13 @@ export function connectBridge(force = false): void {
         // it: the traffic itself is what stops a silent socket being treated as a dead one.
       } else if (msg.type === "tool-progress" && typeof msg.text === "string") {
         setState({ toolProgress: { tool: String(msg.tool ?? ""), text: msg.text } });
+      } else if (msg.type === "preview-status" && typeof msg.assetId === "string") {
+        // A heavy camera file is not playable until its light preview copy exists. Track that per
+        // asset so a clip that is still being prepared says so, instead of showing a black frame.
+        const next = { ...state.previewStatus };
+        if (msg.state === "building") next[msg.assetId] = { state: "building", percent: Number(msg.percent) || 0 };
+        else delete next[msg.assetId];
+        setState({ previewStatus: next });
       } else if (msg.type === "claude-login-progress" && typeof msg.text === "string") {
         setState({ claudeLoginProgress: msg.text });
       } else if (msg.type === "claude-login-error" && typeof msg.text === "string") {
@@ -743,9 +787,22 @@ export async function fetchAgentStatus(): Promise<void> {
   try {
     const r = await fetch(`${BRIDGE_HTTP}/agent/status`);
     const j = await r.json();
+    const models: ChatModel[] = j.models ?? [];
+    // Keep the user's pick only while the account still offers it; otherwise take the bridge's
+    // default (the best model the account has). This is what makes a newly released model show up
+    // instead of the picker staying stuck on whatever was current when the app was built.
+    const current = state.chatModel;
+    const model = models.some((m) => m.id === current) ? current : (j.defaultModel ?? models[0]?.id ?? "");
+    // Same for effort: a level the newly chosen model does not accept is dropped rather than sent.
+    const levels = models.find((m) => m.id === model)?.effortLevels ?? [];
+    const effort = levels.includes(state.chatEffort as EffortLevel) ? state.chatEffort : "";
+    if (model !== current) saveChoice(MODEL_KEY, model);
+    if (effort !== state.chatEffort) saveChoice(EFFORT_KEY, effort);
     setState({
       agentHasKey: !!j.hasKey,
-      agentModels: j.models ?? [],
+      agentModels: models,
+      chatModel: model,
+      chatEffort: effort,
       canGenerate: !!j.canGenerate,
       claudeExpiresAt: j.claude?.expiresAt ?? null,
     });
@@ -814,7 +871,13 @@ export async function sendChat(text: string): Promise<void> {
     const res = await fetch(`${BRIDGE_HTTP}/agent/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ messages, model: state.chatModel, mentionedMediaRefs: mentioned, chatId: run.chatId }),
+      body: JSON.stringify({
+        messages,
+        model: state.chatModel,
+        ...(state.chatEffort ? { effort: state.chatEffort } : {}),
+        mentionedMediaRefs: mentioned,
+        chatId: run.chatId,
+      }),
     });
     if (!res.body) throw new Error("no stream");
     const reader = res.body.getReader();
@@ -902,7 +965,23 @@ export function useEditor(): EditorState {
 }
 
 // ── local UI actions ──
+/** Run `fn` on every state change until it returns true, or until `timeoutMs` passes. Used where an
+ * edit has to be applied to what the ENGINE produced (the multicam cut restyles the clips a split
+ * has just created), which no fixed delay can be relied on to have happened. */
+export function afterStateChange(fn: () => boolean, timeoutMs = 3000): void {
+  if (fn()) return;
+  const started = Date.now();
+  const un = subscribe(() => {
+    if (fn() || Date.now() - started > timeoutMs) un();
+  });
+  // A change that never arrives must not leave a listener behind forever.
+  setTimeout(() => un(), timeoutMs);
+}
+
 export const ui = {
+  /** The state as it is right now — for code that must read AFTER an engine round-trip (the multicam
+   * cut re-reads the clips a split has just created) rather than from a captured render. */
+  snapshot: (): EditorState => state,
   setPlayhead: (f: number) => setState({ playhead: Math.max(0, Math.round(f)) }),
   advance: (n: number, max: number) => setState({ playhead: Math.min(max, Math.max(0, state.playhead + n)) }),
   setZoom: (pxPerFrame: number) => setState({ pxPerFrame: Math.min(20, Math.max(0.1, pxPerFrame)) }),
@@ -921,7 +1000,19 @@ export const ui = {
           : [id],
     }),
   clearAssets: () => setState({ selectedAssetIds: [] }),
-  setChatModel: (m: string) => setState({ chatModel: m }),
+  setChatModel: (m: string) => {
+    saveChoice(MODEL_KEY, m);
+    // Effort levels are per-model: carrying "xhigh" onto a model that stops at "high" would be a
+    // 400 from the API, so a level the new model does not accept is cleared here.
+    const levels = state.agentModels.find((x) => x.id === m)?.effortLevels ?? [];
+    const effort = levels.includes(state.chatEffort as EffortLevel) ? state.chatEffort : "";
+    if (effort !== state.chatEffort) saveChoice(EFFORT_KEY, effort);
+    setState({ chatModel: m, chatEffort: effort });
+  },
+  setChatEffort: (e: EffortLevel | "") => {
+    saveChoice(EFFORT_KEY, e);
+    setState({ chatEffort: e });
+  },
   // multi-clip selection
   toggleClip: (id: string, additive: boolean) =>
     setState({

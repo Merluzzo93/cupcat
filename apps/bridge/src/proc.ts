@@ -142,7 +142,28 @@ export function jobCancelled(id?: string): boolean {
   return currentJob.stopping;
 }
 
-export async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string>; tag?: string; stdin?: string } = {}): Promise<RunResult> {
+/** Read a stream line by line as it arrives, instead of waiting for the process to finish. Used for
+ * ffmpeg's `-progress pipe:1`, which is only useful while the encode is still running. */
+async function forEachLine(stream: ReadableStream<Uint8Array>, onLine: (line: string) => void): Promise<void> {
+  const dec = new TextDecoder();
+  let buf = "";
+  for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+    buf += dec.decode(chunk, { stream: true });
+    let nl = buf.indexOf("\n");
+    while (nl >= 0) {
+      onLine(buf.slice(0, nl).trim());
+      buf = buf.slice(nl + 1);
+      nl = buf.indexOf("\n");
+    }
+  }
+  if (buf.trim()) onLine(buf.trim());
+}
+
+export async function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string>; tag?: string; stdin?: string; onStdout?: (line: string) => void } = {},
+): Promise<RunResult> {
   const needEnv = opts.env || Object.keys(extraEnv).length > 0;
   const proc = Bun.spawn([cmd, ...args], {
     // "pipe" only when the caller has input to send (e.g. piper reads its text from stdin);
@@ -189,7 +210,9 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; env
   }
   try {
     const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
+      // A caller that wants progress gets each line as it is printed; it does not also need the
+      // whole transcript, so nothing is accumulated in that case.
+      opts.onStdout ? forEachLine(proc.stdout as ReadableStream<Uint8Array>, opts.onStdout).then(() => "") : new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ]);
     const code = await proc.exited;

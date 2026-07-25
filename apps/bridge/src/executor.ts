@@ -45,7 +45,7 @@ import { applyTemplate, listTemplates, saveTemplate } from "./templates";
 import { smoothSlowMo } from "./slowmo";
 import { separateStems } from "./separate";
 import { trackMotion } from "./track-local";
-import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, probeMedia, sourceTimecode } from "./ffmpeg";
+import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, isHeavySource, probeMedia, sourceTimecode } from "./ffmpeg";
 import { generate, getModel, type GenerateOptions, type HfModel, listModels, uploadFile } from "./higgsfield";
 import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "./media";
 import { startRecording, stopRecording } from "./recorder";
@@ -175,6 +175,26 @@ export async function importFolderMedia(ctx: BridgeContext): Promise<void> {
   } catch {
     /* best-effort; folder may be empty or unreadable */
   }
+  void prepareHeavyPreviews(ctx);
+}
+
+/**
+ * Start making the light preview copies of any heavy source in the library, one at a time.
+ *
+ * Without this, a camera file is only prepared when the playhead first reaches it — so the second
+ * angle of a two-camera edit sat unprepared until you happened to scrub into it, and then made you
+ * wait. Preparing on open means the wait happens once, up front, while you are still looking
+ * around. The transcode gate keeps them sequential so this never becomes the thing that makes the
+ * machine unusable.
+ */
+function prepareHeavyPreviews(ctx: BridgeContext): void {
+  void (async () => {
+    for (const m of ctx.doc.project.media) {
+      if (m.type !== "video" || !m.url) continue;
+      if (!isHeavySource(m.url)) continue;
+      await ensureScrubProxy(m.url).catch(() => null);
+    }
+  })();
 }
 
 async function listProjectsTool(): Promise<ToolOut> {

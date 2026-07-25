@@ -22,16 +22,42 @@ const KEY_FILE = process.env.CUPCAT_ANTHROPIC_KEY_FILE ?? join(homedir(), "CupCa
 // work is lost — the conversation and timeline state persist, the next turn resumes mid-task.
 const MAX_TURNS = 60;
 
-/** Claude models offered in the chat panel's bottom-left selector (July 2026 lineup).
- * Opus 4.8 stays the default: top agentic/tool-use performance at Opus pricing. Fable 5 is the
- * most capable model overall (always-on thinking, 1M context) for the hardest creative briefs. */
-export const CHAT_MODELS = [
-  { id: "claude-opus-4-8", label: "Opus 4.8" },
-  { id: "claude-fable-5", label: "Fable 5" },
-  { id: "claude-sonnet-5", label: "Sonnet 5" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+/** How hard the model is asked to think. The API's own default is "high"; we only send the
+ * parameter when the user picked a level, and only levels the chosen model actually supports. */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+const EFFORT_ORDER: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+
+/** One model the signed-in account can use, with the capabilities that decide how we call it.
+ * Everything here is read from the Models API — nothing about a model is hardcoded, which is why
+ * a model released after this build (Opus 5 was) still shows up and is called correctly. */
+export interface ChatModel {
+  id: string;
+  label: string;
+  /** Context window (input tokens) — this is what "1M context" means in the picker. */
+  contextTokens: number;
+  /** Output ceiling for one reply. */
+  maxOutput: number;
+  /** Effort levels this model accepts; empty when it has no effort control at all. */
+  effortLevels: EffortLevel[];
+  /** Whether adaptive extended thinking is accepted (`thinking: {type:"adaptive"}`). */
+  adaptiveThinking: boolean;
+}
+
+/**
+ * Used only when the Models API cannot be reached (offline, token without models access). Kept
+ * deliberately short — it is a lifeboat so the picker is never empty, NOT the list of what exists.
+ * The live account list always wins.
+ */
+const FALLBACK_MODELS: ChatModel[] = [
+  { id: "claude-opus-5", label: "Claude Opus 5", contextTokens: 1_000_000, maxOutput: 128_000, effortLevels: [...EFFORT_ORDER], adaptiveThinking: true },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5", contextTokens: 1_000_000, maxOutput: 128_000, effortLevels: [...EFFORT_ORDER], adaptiveThinking: true },
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8", contextTokens: 1_000_000, maxOutput: 128_000, effortLevels: [...EFFORT_ORDER], adaptiveThinking: true },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", contextTokens: 200_000, maxOutput: 64_000, effortLevels: [], adaptiveThinking: false },
 ];
-const DEFAULT_MODEL = CHAT_MODELS[0].id;
+
+/** Which model to start on, most preferred first. A preference, not a gate: if none of these are on
+ * the account the first model the API returns is used, so a future release is picked up on its own. */
+const PREFERRED_DEFAULTS = ["claude-opus-5", "claude-opus-4-8", "claude-sonnet-5", "claude-opus-4-7"];
 
 /** How the in-app assistant authenticates to Claude. OAuth (the user's Claude subscription) is
  * preferred — no API key needed; an API key is only a last-resort fallback. */
@@ -91,15 +117,58 @@ export async function getAuth(): Promise<ClaudeAuth | null> {
   return null;
 }
 
+/** Shape of one entry in the Models API response we care about. */
+export interface ApiModel {
+  id?: string;
+  display_name?: string;
+  max_input_tokens?: number;
+  max_tokens?: number;
+  capabilities?: {
+    effort?: { supported?: boolean } & Record<string, { supported?: boolean } | boolean | undefined>;
+    thinking?: { types?: { adaptive?: { supported?: boolean } } };
+  };
+}
+
+export function toChatModel(m: ApiModel): ChatModel | null {
+  if (typeof m.id !== "string" || !m.id) return null;
+  const eff = m.capabilities?.effort;
+  const levels: EffortLevel[] =
+    eff?.supported === true
+      ? EFFORT_ORDER.filter((l) => {
+          const v = eff[l];
+          return typeof v === "object" && v !== null && v.supported === true;
+        })
+      : [];
+  return {
+    id: m.id,
+    label: m.display_name || m.id,
+    contextTokens: typeof m.max_input_tokens === "number" ? m.max_input_tokens : 0,
+    maxOutput: typeof m.max_tokens === "number" ? m.max_tokens : 8192,
+    effortLevels: levels,
+    adaptiveThinking: m.capabilities?.thinking?.types?.adaptive?.supported === true,
+  };
+}
+
+// The list is asked for on every status poll and again on every chat call (to read capabilities),
+// so it is cached briefly rather than re-fetched each time. Short TTL: a newly released model, or a
+// change of plan, appears within a minute or two without restarting CupCat.
+const MODELS_TTL_MS = 5 * 60_000;
+let modelsCache: { at: number; token: string; models: ChatModel[] } | null = null;
+
 /**
- * The chat models the SIGNED-IN account can actually use. Queries the Models API with the current
- * auth and keeps only the CHAT_MODELS the account is entitled to. Best-effort: on any failure (no
- * auth, endpoint not permitted for this token, network error) it returns the full list, so the
- * dropdown never ends up empty.
+ * Every model the SIGNED-IN account can actually use, straight from the Models API, in the order
+ * the API returns them (newest first) with the label and capabilities it reports.
+ *
+ * This used to filter a hardcoded list, which meant a model released after the build — Claude Opus 5
+ * — could never appear no matter what the account had. Nothing is filtered now: what the account has
+ * is what the picker offers. Best-effort: any failure falls back to a small built-in list so the
+ * dropdown is never empty.
  */
-export async function availableChatModels(): Promise<typeof CHAT_MODELS> {
+export async function availableChatModels(): Promise<ChatModel[]> {
   const auth = await getAuth();
-  if (!auth) return CHAT_MODELS;
+  if (!auth) return FALLBACK_MODELS;
+  const fresh = modelsCache && modelsCache.token === auth.token && Date.now() - modelsCache.at < MODELS_TTL_MS;
+  if (fresh && modelsCache) return modelsCache.models;
   try {
     const headers: Record<string, string> = { "anthropic-version": API_VERSION };
     if (auth.mode === "apikey") headers["x-api-key"] = auth.token;
@@ -108,17 +177,48 @@ export async function availableChatModels(): Promise<typeof CHAT_MODELS> {
       headers["anthropic-beta"] = "oauth-2025-04-20";
     }
     const res = await fetch("https://api.anthropic.com/v1/models?limit=100", { headers });
-    if (!res.ok) return CHAT_MODELS;
-    const j = (await res.json()) as { data?: { id?: string }[] };
-    const ids = (j.data ?? []).map((m) => m.id).filter((x): x is string => typeof x === "string");
-    if (ids.length === 0) return CHAT_MODELS;
-    // A configured model counts as available if a returned id matches it (either direction handles
-    // the dated vs base-id variants, e.g. claude-haiku-4-5 vs claude-haiku-4-5-20251001).
-    const avail = CHAT_MODELS.filter((m) => ids.some((id) => id === m.id || id.startsWith(m.id) || m.id.startsWith(id)));
-    return avail.length ? avail : CHAT_MODELS;
+    if (!res.ok) return modelsCache?.models ?? FALLBACK_MODELS;
+    const j = (await res.json()) as { data?: ApiModel[] };
+    const models = (j.data ?? []).map(toChatModel).filter((m): m is ChatModel => m !== null);
+    if (models.length === 0) return modelsCache?.models ?? FALLBACK_MODELS;
+    modelsCache = { at: Date.now(), token: auth.token, models };
+    return models;
   } catch {
-    return CHAT_MODELS;
+    return modelsCache?.models ?? FALLBACK_MODELS;
   }
+}
+
+/** The model a fresh install starts on: the most preferred one the account actually has. */
+export async function defaultChatModel(): Promise<string> {
+  const models = await availableChatModels();
+  for (const want of PREFERRED_DEFAULTS) {
+    const hit = models.find((m) => m.id === want || m.id.startsWith(`${want}-`));
+    if (hit) return hit.id;
+  }
+  return models[0]?.id ?? FALLBACK_MODELS[0]!.id;
+}
+
+/** Resolve a requested model id to one the account has, falling back to the default. */
+async function resolveModel(requested?: string): Promise<{ id: string; info: ChatModel | null }> {
+  const models = await availableChatModels();
+  const hit = requested ? models.find((m) => m.id === requested) : undefined;
+  if (hit) return { id: hit.id, info: hit };
+  const id = await defaultChatModel();
+  return { id, info: models.find((m) => m.id === id) ?? null };
+}
+
+/** The level to actually send: the one asked for, or the closest lower level the model accepts.
+ * Sending an unsupported level is a 400, so asking for "xhigh" on a model that stops at "high"
+ * quietly becomes "high" instead of failing the whole turn. */
+export function clampEffort(want: EffortLevel | undefined, info: ChatModel | null): EffortLevel | undefined {
+  if (!want || !info || info.effortLevels.length === 0) return undefined;
+  if (info.effortLevels.includes(want)) return want;
+  const wantIdx = EFFORT_ORDER.indexOf(want);
+  for (let i = wantIdx - 1; i >= 0; i--) {
+    const l = EFFORT_ORDER[i]!;
+    if (info.effortLevels.includes(l)) return l;
+  }
+  return info.effortLevels[0];
 }
 
 /** Manual API-key fallback (Setup). Most users never need this — Claude Code OAuth is used. */
@@ -157,7 +257,13 @@ function toToolResultContent(content: { type: string; text?: string; data?: stri
   );
 }
 
-async function callAnthropic(auth: ClaudeAuth, model: string, system: string, messages: ChatMessage[], opts: { tools?: boolean; maxTokens?: number; signal?: AbortSignal } = {}) {
+async function callAnthropic(
+  auth: ClaudeAuth,
+  model: string,
+  system: string,
+  messages: ChatMessage[],
+  opts: { tools?: boolean; maxTokens?: number; signal?: AbortSignal; effort?: EffortLevel; info?: ChatModel | null } = {},
+) {
   const headers: Record<string, string> = { "content-type": "application/json", "anthropic-version": API_VERSION };
   const betas: string[] = [];
   if (auth.mode === "apikey") {
@@ -191,24 +297,29 @@ async function callAnthropic(auth: ClaudeAuth, model: string, system: string, me
   let lastNetErr: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      // Adaptive extended thinking on the 4.6+ chat models: the agent reasons before acting
-      // (better plans, fewer flailing tool loops). Thinking blocks come back in content and are
-      // passed through untouched on later turns, as the API requires. Fable 5 has thinking
-      // always-on (adaptive is the only accepted value). One-shot helpers and the pre-4.6
-      // models keep the plain call.
-      const adaptive =
-        opts.tools !== false &&
-        (isFable || model.startsWith("claude-opus-4-8") || model.startsWith("claude-sonnet-4-6") || model.startsWith("claude-sonnet-5"));
+      // Adaptive extended thinking: the agent reasons before acting (better plans, fewer flailing
+      // tool loops). Thinking blocks come back in content and are passed through untouched on later
+      // turns, as the API requires. Whether a model accepts it is READ FROM THE MODEL, not guessed
+      // from its name — the old name-prefix list silently left every newly released model (Opus 5)
+      // on the plain, no-thinking path.
+      const info = opts.info ?? (await availableChatModels()).find((m) => m.id === model) ?? null;
+      const adaptive = opts.tools !== false && info?.adaptiveThinking === true;
+      const effort = clampEffort(opts.effort, info);
+      // Thinking shares the reply budget, so a deeper effort needs more room or the answer gets
+      // truncated mid-sentence. Kept at/below ~16k: these calls are not streamed, and a big budget
+      // on a non-streamed request risks an HTTP timeout instead of an answer.
+      const budget = effort === "xhigh" || effort === "max" ? 16000 : effort === "high" ? 12000 : adaptive ? 8192 : 4096;
       res = await fetch(API_URL, {
         method: "POST",
         headers,
         signal: opts.signal, // a chat-stop aborts the in-flight request
         body: JSON.stringify({
           model,
-          max_tokens: opts.maxTokens ?? (adaptive ? 8192 : 4096),
+          max_tokens: Math.min(opts.maxTokens ?? budget, info?.maxOutput ?? 128000),
           system: systemParam,
           ...(opts.tools === false ? {} : { tools: anthropicTools() }),
           ...(adaptive ? { thinking: { type: "adaptive" } } : {}),
+          ...(effort ? { output_config: { effort } } : {}),
           ...(isFable ? { fallbacks: [{ model: "claude-opus-4-8" }] } : {}),
           messages,
         }),
@@ -265,6 +376,7 @@ async function callAnthropic(auth: ClaudeAuth, model: string, system: string, me
 export interface ChatRequest {
   messages: ChatMessage[]; // prior turns (role/content), newest user message last
   model?: string;
+  effort?: EffortLevel; // how hard to think; ignored by models without effort control
   mentionedMediaRefs?: string[]; // assets the user selected/@-referenced in the library
   chatId?: string; // originating conversation — used for cross-conversation context + saving
 }
@@ -364,7 +476,7 @@ export async function runChat(ctx: BridgeContext, req: ChatRequest, send: (event
   }
 
   const messages: ChatMessage[] = req.messages.map((m) => ({ role: m.role, content: m.content }));
-  const model = req.model && CHAT_MODELS.some((m) => m.id === req.model) ? req.model : DEFAULT_MODEL;
+  const { id: model, info: modelInfo } = await resolveModel(req.model);
 
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -375,11 +487,11 @@ export async function runChat(ctx: BridgeContext, req: ChatRequest, send: (event
       }
       let resp: Awaited<ReturnType<typeof callAnthropic>>;
       try {
-        resp = await callAnthropic(auth, model, system, pruneForRequest(messages), { signal: ac.signal });
+        resp = await callAnthropic(auth, model, system, pruneForRequest(messages), { signal: ac.signal, effort: req.effort, info: modelInfo });
       } catch (e) {
         // A 413 despite normal pruning (e.g. one giant image) → retry once with everything pruned.
         if (e instanceof Error && /\b413\b/.test(e.message)) {
-          resp = await callAnthropic(auth, model, system, pruneForRequest(messages, true), { signal: ac.signal });
+          resp = await callAnthropic(auth, model, system, pruneForRequest(messages, true), { signal: ac.signal, effort: req.effort, info: modelInfo });
         } else throw e;
       }
 
@@ -465,9 +577,14 @@ export async function oneShotText(system: string, user: string, opts: { model?: 
       "Claude is not connected. Open the chat panel and sign in (or set an API key) first — AI clip curation runs on the same account as the chat.",
     );
   }
-  const model = opts.model && CHAT_MODELS.some((m) => m.id === opts.model) ? opts.model : DEFAULT_MODEL;
+  const { id: model, info } = await resolveModel(opts.model);
   const resp = await callAnthropic(auth, model, system, [{ role: "user", content: user }], {
     tools: false,
+    info,
+    // Internal helpers judge and sort — they do not need deep reasoning, and on models where
+    // thinking is on by default it would otherwise eat into the reply budget. Low effort keeps
+    // these calls short, cheap and fast.
+    effort: "low",
     maxTokens: opts.maxTokens ?? 8192,
     signal: currentAbort?.signal, // a chat-stop aborts internal calls too (e.g. auto_clips curation)
   });
@@ -493,7 +610,7 @@ export async function oneShotVision(
       "Claude is not connected. Open the chat panel and sign in (or set an API key) first — AI clip curation runs on the same account as the chat.",
     );
   }
-  const model = opts.model && CHAT_MODELS.some((m) => m.id === opts.model) ? opts.model : DEFAULT_MODEL;
+  const { id: model, info } = await resolveModel(opts.model);
   const content = [
     { type: "text", text: userText },
     ...images.map((i) => ({
@@ -503,6 +620,8 @@ export async function oneShotVision(
   ];
   const resp = await callAnthropic(auth, model, system, [{ role: "user", content }], {
     tools: false,
+    info,
+    effort: "low", // see oneShotText: these are judgement calls, not deep reasoning
     maxTokens: opts.maxTokens ?? 8192,
     signal: currentAbort?.signal, // a chat-stop aborts internal calls too (e.g. auto_clips curation)
   });

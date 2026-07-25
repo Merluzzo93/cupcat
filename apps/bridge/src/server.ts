@@ -2,7 +2,7 @@
 // server — one server on the Palmier-style port 19789.
 
 import { join } from "node:path";
-import { availableChatModels, type ChatRequest, getClaudeStatus, requestChatStop, runChat, setApiKey } from "./agent-chat";
+import { availableChatModels, type ChatRequest, defaultChatModel, getClaudeStatus, requestChatStop, runChat, setApiKey } from "./agent-chat";
 import { deleteChat, getChats, newChat, saveActiveChat, saveChat, selectChat } from "./chats";
 import { BRIDGE_PORT, CUPCAT_VERSION, exportsDir, webDir } from "./config";
 import { entriesBetween } from "./changelog";
@@ -11,7 +11,7 @@ import { ensureCompoundBake } from "./export";
 import { type BridgeContext, executeTool, importFolderMedia } from "./executor";
 import { createFeedbackBundle } from "./feedback";
 import { handleRpc, type RpcMessage } from "./mcp-http";
-import { audioPeaks, ensureAudioProxy, ensureScrubProxy, ensureThumbnail } from "./ffmpeg";
+import { audioPeaks, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, isHeavySource, type PreviewState, proxyProgress, scrubProxyPath, setProxyWatcher } from "./ffmpeg";
 import { mediaPathFor, saveProject } from "./media";
 import { cancelJob, currentJob_, killTagged, openInBrowser } from "./proc";
 import { claudeInstalled, installClaudeCode, startClaudeLogin, submitClaudeCode } from "./claude-code";
@@ -55,6 +55,24 @@ function corsHeaders(req: Request): Record<string, string> {
  * clip) seeks to a far position by fetching only that byte range — without 206 it would download
  * the whole file from the start, leaving a black frame at cuts that jump near the end. Shared by
  * the asset route and the compound-bake route. */
+/**
+ * Most bytes we will hand back for one request.
+ *
+ * A browser asks a <video> for `Range: bytes=0-` — no end. Answering that literally means the
+ * response body is the WHOLE file, and Bun materialises a slice in memory rather than streaming it:
+ * measured on a 19.8 GB camera file, one such request took the engine from 55 MB to 545 MB, and a
+ * few of them to over 20 GB — at which point Bun aborts with "ran out of memory", the engine dies,
+ * the preview goes black and the app reports lost contact. That is the whole bug: it was never the
+ * decoder (two 4K/90 Mbps streams decode fine here), it was the engine being asked to hold a
+ * 20 GB file in RAM to answer a seek.
+ *
+ * Serving a shorter range than asked for is normal HTTP — the player simply asks for the next
+ * window. Measured with this cap: 6 range requests over the same file moved memory 55 → 79 MB.
+ * (Streaming the slice instead was tried and is far worse — 4.2 GB for the same six requests —
+ * so the cap, not a stream, is the fix.)
+ */
+const MEDIA_WINDOW = 8 * 1024 * 1024;
+
 async function serveFileWithRange(req: Request, serve: string): Promise<Response> {
   const file = Bun.file(serve);
   if (!(await file.exists())) return new Response("Not found", { status: 404 });
@@ -74,6 +92,8 @@ async function serveFileWithRange(req: Request, serve: string): Promise<Response
     if (start > end || start >= size) {
       return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}`, "Accept-Ranges": "bytes" } });
     }
+    // Never hand back more than one window, however much was asked for (see MEDIA_WINDOW).
+    end = Math.min(end, start + MEDIA_WINDOW - 1);
     return new Response(file.slice(start, end + 1), {
       status: 206,
       headers: {
@@ -84,9 +104,36 @@ async function serveFileWithRange(req: Request, serve: string): Promise<Response
       },
     });
   }
+  // No Range header at all. Small files (thumbnails, audio proxies) go back whole, as before. A
+  // large one must not: handing the whole 19.8 GB body to Bun costs gigabytes of memory the same
+  // way an open-ended range does (measured: 2 GB within six seconds, still climbing). Answer with
+  // the first window instead and let the player ask for the rest — which is exactly what it does.
+  if (size > MEDIA_WINDOW) {
+    const end = MEDIA_WINDOW - 1;
+    return new Response(file.slice(0, end + 1), {
+      status: 206,
+      headers: {
+        "Content-Range": `bytes 0-${end}/${size}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": String(end + 1),
+        "Content-Type": ctype,
+      },
+    });
+  }
   return new Response(file, {
     headers: { "Accept-Ranges": "bytes", "Content-Length": String(size), "Content-Type": ctype },
   });
+}
+
+/** Where every heavy asset's preview stands right now — for a window that has just connected while
+ * a proxy is already being built, which would otherwise show those clips as simply broken. */
+function previewStatuses(ctx: BridgeContext): { assetId: string; state: PreviewState; percent: number }[] {
+  return ctx.doc.project.media
+    .filter((m) => m.type === "video" && !!m.url && isHeavySource(m.url))
+    .map((m) => {
+      const ready = Bun.file(scrubProxyPath(m.url as string)).size > 1024;
+      return { assetId: m.id, state: (ready ? "ready" : "building") as PreviewState, percent: ready ? 1 : proxyProgress(m.url as string) };
+    });
 }
 
 export function startServer(ctx: BridgeContext) {
@@ -128,6 +175,15 @@ export function startServer(ctx: BridgeContext) {
   // Relay long-tool phase text (auto_clips: transcribing → curating → exporting) to every client,
   // so a multi-minute run shows what it's doing instead of looking frozen.
   setProgressSink((p) => broadcastRaw({ type: "tool-progress", tool: p.tool, text: p.text }));
+
+  // Preview proxies: a heavy source is not playable until its proxy exists, so the editor is told
+  // which asset is being prepared and how far along it is — otherwise a clip that cannot play yet
+  // is indistinguishable from a clip that is broken.
+  setProxyWatcher((srcPath, state, percent) => {
+    const asset = ctx.doc.project.media.find((m) => m.url === srcPath);
+    if (!asset) return;
+    broadcastRaw({ type: "preview-status", assetId: asset.id, state, percent });
+  });
 
   const broadcastStatus = async () => {
     const claude = await getClaudeStatus();
@@ -197,6 +253,10 @@ function serve(
   return Bun.serve({
     hostname: "127.0.0.1",
     port: BRIDGE_PORT,
+    // Default is 10 seconds, and the engine logged "request timed out after 10 seconds" while a
+    // media read was still in flight on a slow disk — the player then sees a failed request and
+    // shows nothing. Chat streams and long tool calls sit on this timer too.
+    idleTimeout: 120,
     async fetch(req, server): Promise<Response | undefined> {
       const url = new URL(req.url);
       const path = url.pathname;
@@ -399,6 +459,7 @@ function serve(
             higgsfield: { connected: ctx.canGenerate() },
             canGenerate: ctx.canGenerate(),
             models: await availableChatModels(),
+            defaultModel: await defaultChatModel(),
           },
           { headers: cors },
         );
@@ -515,7 +576,7 @@ function serve(
           const thumb = await ensureThumbnail(asset.url);
           if (thumb) serve = thumb;
         }
-        // Preview scrubbing: serve an all-intra proxy (instant per-frame seeking) when ready.
+        // Preview scrubbing: serve the proxy when ready.
         else if (asset.type === "video" && new URL(req.url).searchParams.get("scrub") === "1") {
           // Web-safe containers can fall back to the original while the proxy builds; anything else
           // (.mov/.mkv/.avi, ProRes…) plays BLACK in the webview, so block until the proxy is ready.
@@ -523,6 +584,16 @@ function serve(
           const webSafe = ext === "mp4" || ext === "m4v" || ext === "webm";
           const proxy = await ensureScrubProxy(asset.url, { wait: !webSafe });
           if (proxy) serve = proxy;
+          else if (isHeavySource(asset.url)) {
+            // Falling back to the original here is what used to kill the engine: the player pulls
+            // the whole file through in range requests, and on a 19.8 GB source that ends in an
+            // out-of-memory abort. Say "not yet" instead — the proxy is building (the editor shows
+            // its progress on the clip) and the player will get a real picture in a moment.
+            return new Response("preview still being prepared", {
+              status: 503,
+              headers: { ...cors, "Retry-After": "5" },
+            });
+          }
         }
         // Preview audio: serve a standalone Opus/AAC audio proxy the WebView2 <audio> element can
         // always decode (the source video container's audio often won't play there).
@@ -637,6 +708,15 @@ function serve(
         clients.add(ws);
         ws.send(stateMsg());
         void broadcastStatus(); // includes canGenerate + Claude connection
+        // A window that opens while a proxy is already building would otherwise show those clips as
+        // simply broken until the encode happened to finish.
+        for (const p of previewStatuses(ctx)) {
+          try {
+            ws.send(JSON.stringify({ type: "preview-status", assetId: p.assetId, state: p.state, percent: p.percent }));
+          } catch {
+            /* dropped client */
+          }
+        }
       },
       close(ws) {
         clients.delete(ws);

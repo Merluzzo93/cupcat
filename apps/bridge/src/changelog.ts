@@ -14,6 +14,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.17",
+    title: "Big camera files play in the preview, and several cameras become one view",
+    points: [
+      "**A big camera file now shows a picture.** Dropping half-hour 4K files on the timeline left the preview black and, a minute later, took the engine down with it. The engine was being asked to hold the whole 19.8 GB file in memory to answer a single seek. CupCat now prepares a light copy of heavy footage, the way every editor does — after that, jumping anywhere in a 19.8 GB file draws a frame in **about 30 milliseconds**, where before it never drew one at all.",
+      "**You can see it being prepared.** Heavy clips show their own poster frame and a progress bar until their preview copy is ready, instead of a black rectangle you cannot tell from a broken file. Preparation starts as soon as the project opens, one file at a time, so it does not fight for the machine.",
+      "**Angles — a proper multicam view.** Two or more cameras covering the same moment now appear side by side, all showing the same instant. The one on air is marked; click another (or press its number) to cut to it from the playhead onwards. It works on anything stacked on separate video tracks, whether Sync cameras lined it up or you did.",
+      "**The assistant offers every model your Claude account has**, read from the account itself rather than a list fixed when CupCat was built — which is why Claude Opus 5 was missing. Each model shows its context window, and where a model supports it you can also choose how hard it thinks.",
+    ],
+  },
+  {
     version: "1.7.16",
     title: "The engine restarts itself, and sync handles cameras minutes apart",
     points: [
