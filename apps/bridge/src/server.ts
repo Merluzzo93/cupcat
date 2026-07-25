@@ -582,9 +582,13 @@ function serve(
           // (.mov/.mkv/.avi, ProRes…) plays BLACK in the webview, so block until the proxy is ready.
           const ext = (asset.url.split(".").pop() ?? "").toLowerCase();
           const webSafe = ext === "mp4" || ext === "m4v" || ext === "webm";
-          const proxy = await ensureScrubProxy(asset.url, { wait: !webSafe });
+          const heavy = isHeavySource(asset.url);
+          // Blocking until the proxy exists is fine for a small .mov (seconds). On a heavy source it
+          // is minutes, and a request held open that long is just a slower way to show nothing —
+          // answer "not yet" instead, so the editor can show the poster and the progress.
+          const proxy = await ensureScrubProxy(asset.url, { wait: !webSafe && !heavy });
           if (proxy) serve = proxy;
-          else if (isHeavySource(asset.url)) {
+          else if (heavy) {
             // Falling back to the original here is what used to kill the engine: the player pulls
             // the whole file through in range requests, and on a 19.8 GB source that ends in an
             // out-of-memory abort. Say "not yet" instead — the proxy is building (the editor shows
