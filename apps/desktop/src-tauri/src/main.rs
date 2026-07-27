@@ -2,6 +2,7 @@
 // 127.0.0.1:19789) and shows the bundled SPA, which talks to the bridge over that port.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -69,6 +70,7 @@ fn build_sidecar(app: &tauri::AppHandle) -> Result<tauri_plugin_shell::process::
 async fn supervise(app: tauri::AppHandle, shutting_down: Arc<AtomicBool>, log_path: Option<PathBuf>) {
     use std::io::Write;
     let mut fails: u32 = 0;
+    let mut takeovers: u32 = 0;
     loop {
         if shutting_down.load(Ordering::SeqCst) {
             break;
@@ -96,9 +98,11 @@ async fn supervise(app: tauri::AppHandle, shutting_down: Arc<AtomicBool>, log_pa
             *state.0.lock().unwrap() = Some(child);
         }
         let started = std::time::Instant::now();
+        let mut exit_code: Option<i32> = None;
         // Drain the process's output until the channel closes, which happens when it exits.
         while let Some(event) = rx.recv().await {
             match event {
+                CommandEvent::Terminated(payload) => exit_code = payload.code,
                 CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
                     let s = String::from_utf8_lossy(&line);
                     print!("[bridge] {s}");
@@ -112,6 +116,27 @@ async fn supervise(app: tauri::AppHandle, shutting_down: Arc<AtomicBool>, log_pa
             }
         }
         if shutting_down.load(Ordering::SeqCst) {
+            break;
+        }
+        // Exit code 3 means the port was already taken. Respawning changes nothing — the engine will
+        // exit for the same reason forever, which is exactly what happened: an engine left behind by
+        // an OLDER install kept the port, the new window never got an engine of its own, and the log
+        // filled with the same line 25 times while the window sat black.
+        //
+        // Only one CupCat window can exist (single-instance), so any engine we did not start is an
+        // orphan with no window to serve. Take the port from it and carry on.
+        if exit_code == Some(3) {
+            if takeovers < 3 {
+                takeovers += 1;
+                eprintln!("[cupcat] the engine port is held by an engine from another install; taking it over");
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "cupcat-bridge.exe"])
+                    .creation_flags(0x0800_0000) // CREATE_NO_WINDOW: no console flash
+                    .status();
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                continue;
+            }
+            eprintln!("[cupcat] could not claim the engine port after several attempts; giving up");
             break;
         }
         // Ran for a good while before dying → a genuine crash, not a boot loop: forgive past failures.
