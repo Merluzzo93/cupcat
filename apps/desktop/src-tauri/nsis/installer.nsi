@@ -402,7 +402,9 @@ FunctionEnd
 ; download and tells the user nothing they can act on. Check first, say the real numbers, and
 ; leave them on this page so they can simply choose another drive.
 !define CUPCAT_REQUIRED_MB 2200
-!define CUPCAT_TEMP_MB 1500      ; what Windows needs on the temp drive (usually C:) during the install   ; ~1.5 GB written + headroom for the shortcuts and uninstaller
+!define CUPCAT_TEMP_MB 500       ; the temp folder itself holds only a few MB; this catches a drive
+                                 ; so full that Windows misbehaves generally, without blocking a
+                                 ; machine that simply keeps C: lean and installs elsewhere   ; ~1.5 GB written + headroom for the shortcuts and uninstaller
 
 Function CupCatCheckSpace
   ; The install drive is not the only one that has to have room: NSIS does its work in the Windows

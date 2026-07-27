@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.20",
+    title: "Installing tells you which drive is full, and the Higgsfield button opens the browser again",
+    points: [
+      "**\"Extract: error writing to file\" during installation now says what is actually wrong.** Installing to D: failed when **C:** was full — Windows does the install work in its temporary folder there — and the error named the biggest file instead of the drive that had no room. The installer now checks both drives before it starts and tells you which one is short.",
+      "**The Higgsfield sign-in button opens the browser again.** It called on the window to open the link, and the desktop window silently drops external links — the same fault fixed for the update button in 1.7.15, which had never been applied here. The engine opens it now.",
+      "**Signing in to Claude no longer opens two windows.** Three things were opening it: the official Claude tool, the engine, and the page. Only the first two do now, and the address stays on screen to click or copy.",
+    ],
+  },
+  {
     version: "1.7.19",
     title: "The assistant cuts between people the way an editor does",
     points: [
