@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.18",
+    title: "Looking at long footage stops eating the session",
+    points: [
+      "**Reading a long video is about 28x faster, and free the second time.** Asking what is in a 32-minute recording used to decode the whole file twice — around seven minutes of waiting, repeated from scratch every time the assistant was interrupted, which is how a whole session could go by without a single edit being made. It now reads the light preview copy in one pass and remembers the answer beside the file: **14.7 seconds the first time, 11 milliseconds after that**, with identical results.",
+      "**The assistant knows when to stop looking and start cutting.** On interview and event footage the transcript is the map: it finds the structure in the words, checks a handful of specific moments against the picture, and builds the edit — instead of surveying the same file again after every interruption.",
+    ],
+  },
+  {
     version: "1.7.17",
     title: "Big camera files play in the preview, and several cameras become one view",
     points: [
