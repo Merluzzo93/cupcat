@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.21",
+    title: "It opens again after an update, and a dissolve actually dissolves",
+    points: [
+      "**CupCat no longer opens to a black window.** An engine left behind by a previous install kept the port, so the new one could never start — it was restarted forever instead, and the window never got an engine of its own. Any engine CupCat did not start itself is now recognised as an orphan and moved aside.",
+      "**A cross transition actually dissolves.** Two shots that merely touch cannot blend into each other, so what you got was a fade to black and back — a black blink at every cut, worse than the plain cut it was meant to soften. The outgoing shot now stays on screen while the next one fades in over it, the way it is done on a bench. Verified on a 32-minute recording: the join measured pure black before, and now carries both images at once.",
+      "**The Stop button has room again.** The effort picker sat next to the model and squeezed it; how hard to think is the model's business, so it is gone and the model picker stays.",
+    ],
+  },
+  {
     version: "1.7.20",
     title: "Installing tells you which drive is full, and the Higgsfield button opens the browser again",
     points: [
