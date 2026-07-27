@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.19",
+    title: "The assistant cuts between people the way an editor does",
+    points: [
+      "**Quotes are cut whole, and joined with straight cuts.** Building a best-of from a 32-minute event recording showed what actually makes one readable: every quote a complete thought — cut on the speaker's first and last word, never mid-sentence — and ordered so each one continues the last. Between two talking heads a straight cut is the professional norm; a dissolve there is a dated look, for a jump in time or place.",
+      "**The assistant no longer reaches for a \"cross\" transition between speakers**, because it does not do what its name says: clips on one track cannot overlap, so a cross is a fade to black followed by a fade back in — a black blink at every cut. A real cross-dissolve belongs in the render (overlapping the clips internally) and is not written yet; until it is, the assistant knows to leave it alone and to use a fade only at the very start and end of a piece.",
+    ],
+  },
+  {
     version: "1.7.18",
     title: "Looking at long footage stops eating the session",
     points: [
