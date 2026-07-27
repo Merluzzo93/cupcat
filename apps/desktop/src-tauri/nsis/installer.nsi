@@ -402,37 +402,32 @@ FunctionEnd
 ; download and tells the user nothing they can act on. Check first, say the real numbers, and
 ; leave them on this page so they can simply choose another drive.
 !define CUPCAT_REQUIRED_MB 2200
-!define CUPCAT_TEMP_MB 500       ; the temp folder itself holds only a few MB; this catches a drive
-                                 ; so full that Windows misbehaves generally, without blocking a
-                                 ; machine that simply keeps C: lean and installs elsewhere   ; ~1.5 GB written + headroom for the shortcuts and uninstaller
+!define CUPCAT_TEMP_MB 500
+
+; FileFunc.nsh only DEFINES these; each one has to be instantiated before it can be called.
+!insertmacro GetRoot
+!insertmacro DriveSpace
 
 Function CupCatCheckSpace
-  ; The install drive is not the only one that has to have room: NSIS does its work in the Windows
-  ; temp folder, which is normally on C:. Installing to D: while C: was short is exactly how this
-  ; was reported - the extraction died on the largest file with a message about that file, and the
-  ; drive that was actually full was never mentioned.
+  ; The install drive is not the only one that needs room: Windows does the install work in its
+  ; temp folder, normally on C:. Installing to D: while C: was full is exactly how this was
+  ; reported - the extraction died on the largest file and named that file, never the full drive.
+  ; NSIS message strings cannot span lines, so each of these is deliberately one line.
   ${GetRoot} "$TEMP" $7
-  ${DriveSpace} "$7\\" "/D=F /S=M" $6
+  ${DriveSpace} "$7\" "/D=F /S=M" $6
   ${If} $6 != ""
-    ${If} $6 < ${CUPCAT_TEMP_MB}
-      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "Windows works in a temporary folder on $7 while installing, and that drive has only $6 MB free - about ${CUPCAT_TEMP_MB} MB is needed there even when CupCat itself is installed elsewhere.$$
-$$
-Free up some space on $7, then try again." IDOK cupcat_temp_ok
-      Abort
-      cupcat_temp_ok:
-    ${EndIf}
+  ${AndIf} $6 < ${CUPCAT_TEMP_MB}
+    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "Windows installs through a temporary folder on $7, and that drive has only $6 MB free. Free up some space on $7 and try again - CupCat itself can still be installed on another drive." IDOK cupcat_temp_ok
+    Abort
+    cupcat_temp_ok:
   ${EndIf}
   ${GetRoot} "$INSTDIR" $9
-  ${DriveSpace} "$9\\" "/D=F /S=M" $8   ; free megabytes on the target drive
-  ; An unreadable drive (a path not yet created, a network location) returns empty: do not block on it.
+  ${DriveSpace} "$9\" "/D=F /S=M" $8
   ${If} $8 != ""
-    ${If} $8 < ${CUPCAT_REQUIRED_MB}
-      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "CupCat needs about ${CUPCAT_REQUIRED_MB} MB on $9 and that drive has $8 MB free.$$
-$$
-Choose another drive, or free up some space and try again. Installing anyway will fail partway through." IDOK cupcat_space_ok
-      Abort   ; stay on the directory page so another drive can be picked
-      cupcat_space_ok:
-    ${EndIf}
+  ${AndIf} $8 < ${CUPCAT_REQUIRED_MB}
+    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "CupCat needs about ${CUPCAT_REQUIRED_MB} MB on $9 and that drive has $8 MB free. Choose another drive, or free up space - installing anyway will fail partway through." IDOK cupcat_space_ok
+    Abort
+    cupcat_space_ok:
   ${EndIf}
 FunctionEnd
 
