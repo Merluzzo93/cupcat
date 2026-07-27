@@ -42,6 +42,27 @@ function saveChoice(key: string, value: string): void {
   }
 }
 
+/** Open a link in the SYSTEM browser. Inside the desktop shell the webview silently ignores
+ * window.open for external URLs, so the engine does it; in a plain browser the engine call is
+ * unavailable or reports it did nothing, and window.open is correct. */
+export async function openExternal(url: string): Promise<void> {
+  try {
+    const r = await fetch(`${BRIDGE_HTTP}/open`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }).then((x) => x.json());
+    if (r?.opened) return;
+  } catch {
+    /* engine unreachable — try the page's own opener below */
+  }
+  try {
+    window.open(url, "_blank", "noopener");
+  } catch {
+    /* nothing more we can do; the URL is shown in the panel to click or copy */
+  }
+}
+
 export function mediaUrl(assetId: string): string {
   return `${BRIDGE_HTTP}/media/${encodeURIComponent(assetId)}`;
 }
@@ -335,15 +356,16 @@ export function connectBridge(force = false): void {
         markLocalAction(); // acks only ever answer THIS window's commands
         if (typeof msg.id === "number") pendingAcks.get(msg.id)?.({ text: String(msg.text ?? ""), isError: !!msg.isError });
       } else if (msg.type === "higgsfield-login-url" && typeof msg.url === "string") {
-        // The bridge already tried to open the browser; open it here too (the WebView can pop the
-        // system browser) and surface the URL so the user can click/copy it if nothing opened.
+        // window.open on an external URL is DROPPED by the desktop webview — the same thing that
+        // made the update button look dead. Ask the engine to open it (the /open endpoint exists
+        // for exactly this), and fall back to window.open only in a plain browser, where it works.
         setState({ higgsfieldLoginUrl: msg.url });
-        try { window.open(msg.url, "_blank", "noopener"); } catch {}
+        void openExternal(msg.url);
       } else if (msg.type === "claude-login-url" && typeof msg.url === "string") {
-        // The official Claude sign-in printed its authorize URL; the bridge already opened the
-        // browser, we open it here too and reveal the code box (the login now waits for the code).
+        // NOT opened here: the official Claude CLI opens the browser itself and the engine opens it
+        // too, so opening a third time is what produced two sign-in windows. The URL is shown in
+        // the panel so it can still be clicked or copied if nothing came up.
         setState({ claudeLoginUrl: msg.url, claudeLoginBusy: false, claudeCodeNeeded: true });
-        try { window.open(msg.url, "_blank", "noopener"); } catch {}
       } else if (msg.type === "ping") {
         // Proof of life while a long job runs. Nothing to do with it beyond having received
         // it: the traffic itself is what stops a silent socket being treated as a dead one.
