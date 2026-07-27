@@ -4,7 +4,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { t } from "./i18n";
-import { clearChat, deleteChat, type EffortLevel, newChat, recheckConnections, selectChat, sendChat, setAnthropicKey, stopChat, ui, useEditor } from "./store";
+import { clearChat, deleteChat, newChat, recheckConnections, selectChat, sendChat, setAnthropicKey, stopChat, ui, useEditor } from "./store";
 import type { MediaAsset } from "@cupcat/editor-core";
 import { assetTypeIcon, filterAssets, findMentionToken, insertMention } from "./chatMentions";
 import { promptLibrary } from "./promptLibrary";
@@ -43,9 +43,7 @@ function contextLabel(tokens: number | undefined): string {
 }
 
 export function ChatPanel() {
-  const { chat, chatList, activeChatId, chatBusy, chatModel, chatEffort, agentModels, agentHasKey, selectedAssetIds, project } = useEditor();
-  // Only the levels the CHOSEN model accepts — asking a model for a level it does not have is a 400.
-  const effortLevels = agentModels.find((m) => m.id === chatModel)?.effortLevels ?? [];
+  const { chat, chatList, activeChatId, chatBusy, chatModel, agentModels, agentHasKey, selectedAssetIds, project } = useEditor();
   const [draft, setDraft] = useState("");
   const [keyDraft, setKeyDraft] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -490,39 +488,22 @@ export function ChatPanel() {
                 className="block w-full resize-none overflow-y-auto bg-transparent px-3 pt-2 text-xs leading-5 text-neutral-200 outline-none placeholder:text-neutral-600"
               />
               <div className="flex items-center justify-between px-2 pb-2">
-                {/* Model + effort. The model list is whatever the signed-in Claude account can
-                  * use (read live from the Models API), and the effort levels offered are the ones
-                  * THAT model accepts — so neither list can go stale when a new model ships. */}
-                <div className="flex items-center gap-1">
-                  <select
-                    value={chatModel}
-                    onChange={(e) => ui.setChatModel(e.target.value)}
-                    title={t("chat.modelHint")}
-                    className="rounded-md bg-neutral-800 px-1.5 py-1 text-[11px] text-neutral-300 outline-none hover:bg-neutral-700"
-                  >
-                    {agentModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                        {contextLabel(m.contextTokens)}
-                      </option>
-                    ))}
-                  </select>
-                  {effortLevels.length > 0 && (
-                    <select
-                      value={chatEffort}
-                      onChange={(e) => ui.setChatEffort(e.target.value as EffortLevel | "")}
-                      title={t("chat.effortHint")}
-                      className="rounded-md bg-neutral-800 px-1.5 py-1 text-[11px] text-neutral-400 outline-none hover:bg-neutral-700"
-                    >
-                      <option value="">{t("chat.effort.auto")}</option>
-                      {effortLevels.map((l) => (
-                        <option key={l} value={l}>
-                          {t(`chat.effort.${l}`)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                {/* The model picker, and nothing else: how hard the model thinks is left to the
+                  * model. A second dropdown here squeezed the Stop button, and Stop is the control
+                  * you reach for in a hurry. */}
+                <select
+                  value={chatModel}
+                  onChange={(e) => ui.setChatModel(e.target.value)}
+                  title={t("chat.modelHint")}
+                  className="rounded-md bg-neutral-800 px-1.5 py-1 text-[11px] text-neutral-300 outline-none hover:bg-neutral-700"
+                >
+                  {agentModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                      {contextLabel(m.contextTokens)}
+                    </option>
+                  ))}
+                </select>
                 {/* While a run streams, the send button becomes a real STOP: the bridge halts the
                   * agent at the next safe boundary and edits already applied are kept. */}
                 <button

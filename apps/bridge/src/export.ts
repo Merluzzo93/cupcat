@@ -8,6 +8,7 @@
 import { join } from "node:path";
 import {
   type Clip,
+  type Track,
   type ColorGrade,
   type Crop,
   clipEndFrame,
@@ -379,11 +380,45 @@ function clipLookFilters(c: Clip, fps: number): { pre: string; post: string } {
   return { pre: pre ? `${pre},` : "", post: look ? `,${look}` : "" };
 }
 
-/** Alpha fade in/out for a video/image clip (leading comma; timeline-time st, frame-exact). */
-function videoFade(c: Clip, fps: number): string {
+/**
+ * How long this clip must stay on screen PAST its own end, so that the clip after it can fade in
+ * over the top of it — a real cross-dissolve.
+ *
+ * Two clips that merely touch cannot dissolve into each other: the outgoing one fades its alpha to
+ * zero and the incoming one fades up from zero, so for that moment neither is opaque and the black
+ * background shows through. Measured at such a join: luminance 0 of 255, a black blink at every
+ * cut. What every editor does instead is overlap the two, which on a single track means borrowing
+ * frames from beyond the outgoing clip's out-point.
+ *
+ * Returns 0 when there is nothing to dissolve into, when the next clip does not start exactly here,
+ * or when the source has no frames left to borrow (the last shot of a recording) — in which case
+ * the clip keeps its ordinary fade to black, which is the honest thing to show.
+ */
+export function crossLinger(c: Clip, track: Track, fps: number, assetDurSeconds: number): number {
+  if (c.fadeOutFrames <= 0) return 0;
+  const end = clipEndFrame(c);
+  const next = track.clips.find((n) => n.id !== c.id && n.startFrame === end && n.fadeInFrames > 0);
+  if (!next) return 0;
+  const want = Math.min(c.fadeOutFrames, next.fadeInFrames);
+  if (assetDurSeconds <= 0) return want; // unknown source length: trust the trim
+  // Frames left in the source after this clip's out-point, in TIMELINE frames.
+  const speed = c.speed > 0 ? c.speed : 1;
+  const usedSrc = (c.trimStartFrame + c.durationFrames * speed) / fps;
+  const spare = Math.floor(Math.max(0, assetDurSeconds - usedSrc) * fps / speed);
+  return Math.max(0, Math.min(want, spare));
+}
+
+/** Alpha fade in/out for a video/image clip (leading comma; timeline-time st, frame-exact).
+ * `linger` > 0 means this clip is dissolving into the next one: its fade-out then runs from its own
+ * end onwards, over the same span as the next clip's fade-in, instead of finishing before it. */
+function videoFade(c: Clip, fps: number, linger = 0): string {
   const parts: string[] = [];
   if (c.fadeInFrames > 0) parts.push(`fade=t=in:st=${sf(c.startFrame, fps)}:d=${sf(c.fadeInFrames, fps)}:alpha=1`);
-  if (c.fadeOutFrames > 0) parts.push(`fade=t=out:st=${sf(clipEndFrame(c) - c.fadeOutFrames, fps)}:d=${sf(c.fadeOutFrames, fps)}:alpha=1`);
+  if (c.fadeOutFrames > 0) {
+    const start = linger > 0 ? clipEndFrame(c) : clipEndFrame(c) - c.fadeOutFrames;
+    const dur = linger > 0 ? linger : c.fadeOutFrames;
+    parts.push(`fade=t=out:st=${sf(start, fps)}:d=${sf(dur, fps)}:alpha=1`);
+  }
   return parts.length ? `,${parts.join(",")}` : "";
 }
 
@@ -569,7 +604,7 @@ function geomFilters(c: Clip): string {
 
 /** The clip's tail: opacity (constant, or time-varying via geq when the opacity track moves) +
  * fades + an optional glow/bloom subgraph. Returns one or more filter statements ending in [out]. */
-function clipTail(base: string, c: Clip, fps: number, out: string): string[] {
+function clipTail(base: string, c: Clip, fps: number, out: string, linger = 0): string[] {
   const ok = c.opacityTrack?.keyframes ?? [];
   const varying = ok.length >= 2 && ok.some((k) => k.value !== ok[0]!.value);
   const opa = varying
@@ -578,7 +613,7 @@ function clipTail(base: string, c: Clip, fps: number, out: string): string[] {
         "N",
       )},0,1)'`
     : `colorchannelmixer=aa=${c.opacity}`;
-  const fade = videoFade(c, fps);
+  const fade = videoFade(c, fps, linger);
   const glow = c.effects?.find((e) => e.type === "glow" && e.enabled !== false);
   if (!glow) return [`[${base}]${opa}${fade}[${out}]`];
   const gn = (k: string, d: number) => (typeof glow.params?.[k] === "number" ? (glow.params[k] as number) : d);
@@ -807,7 +842,11 @@ export async function buildVisualGraph(doc: EditorDocument, hdr = false, tlOverr
       if (!asset?.url || asset.generationStatus.kind !== "none") continue;
 
       const t0s = sf(c.startFrame, fps); // frame-exact window bounds for enable/setpts (see sf)
-      const t1s = sf(clipEndFrame(c), fps);
+      // A clip dissolving into the next one stays on screen past its own end, fading out while the
+      // next fades in on top of it (see crossLinger). Everything below - the enable window, the
+      // source it decodes, and the fade itself - has to agree on that extra span.
+      const linger = crossLinger(c, track, fps, asset.durationSeconds ?? 0);
+      const t1s = sf(clipEndFrame(c) + linger, fps);
       const speed = c.speed > 0 ? c.speed : 1;
       const wpx = Math.max(2, Math.round(c.transform.width * W));
       const hpx = Math.max(2, Math.round(c.transform.height * H));
@@ -845,7 +884,7 @@ export async function buildVisualGraph(doc: EditorDocument, hdr = false, tlOverr
         if (pathMaskPng) pushPathMask(imgChain);
         else filters.push(`${imgChain}${geom}${maskFilter(c)}[${base}]`);
       } else {
-        const srcDurFrames = c.durationFrames * speed; // source-side frames (fractional when speed-scaled)
+        const srcDurFrames = (c.durationFrames + linger) * speed; // source-side frames (fractional when speed-scaled)
         const srcDur = srcDurFrames / fps;
         // A clip can run past the end of its source (e.g. its duration exceeds the media, or
         // source fps < project fps). Trim only what really exists and clone the last frame for the
@@ -892,7 +931,7 @@ export async function buildVisualGraph(doc: EditorDocument, hdr = false, tlOverr
           (c.audioDuck ? duckLabels : audioLabels).push(aout);
         }
       }
-      filters.push(...clipTail(base, c, fps, vout));
+      filters.push(...clipTail(base, c, fps, vout, linger));
       const ov = overlayXY(c, W, H, fps, !!kb);
       // Position-keyframed x/y are ffmpeg time-expressions (need `t`), which the `pad` filter below
       // can't evaluate — blend modes are only supported for a clip whose position isn't animated.

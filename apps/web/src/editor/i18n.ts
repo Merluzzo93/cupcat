@@ -219,13 +219,6 @@ const EN = {
   "angles.cutTo": "Cut to {name} from here",
   "angles.live": "on air",
   "chat.modelHint": "Model. The list is what your Claude account can actually use, and the number is its context window.",
-  "chat.effortHint": "How hard the assistant thinks before acting. Higher is more thorough and slower; Auto leaves it to the model.",
-  "chat.effort.auto": "Effort: auto",
-  "chat.effort.low": "Effort: low",
-  "chat.effort.medium": "Effort: medium",
-  "chat.effort.high": "Effort: high",
-  "chat.effort.xhigh": "Effort: extra",
-  "chat.effort.max": "Effort: max",
 
   // ── timeline / preview ──
   "timeline.title": "Timeline",
@@ -698,13 +691,6 @@ const IT: Partial<Record<Key, string>> = {
   "angles.cutTo": "Passa a {name} da qui",
   "angles.live": "in onda",
   "chat.modelHint": "Modello. L’elenco è quello che il tuo account Claude può davvero usare; il numero è la sua finestra di contesto.",
-  "chat.effortHint": "Quanto a fondo ragiona l’assistente prima di agire. Più alto = più accurato e più lento; Auto lo lascia decidere al modello.",
-  "chat.effort.auto": "Sforzo: auto",
-  "chat.effort.low": "Sforzo: basso",
-  "chat.effort.medium": "Sforzo: medio",
-  "chat.effort.high": "Sforzo: alto",
-  "chat.effort.xhigh": "Sforzo: extra",
-  "chat.effort.max": "Sforzo: massimo",
 
   "timeline.title": "Timeline",
   "timeline.noTracks": "nessuna traccia",

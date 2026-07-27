@@ -25,7 +25,6 @@ export const BRIDGE_WS = `${BRIDGE_ORIGIN.replace(/^http/, "ws")}/ws`;
 // The assistant model and effort the user picked, remembered across restarts — choosing Opus every
 // morning is not a choice, it is a chore.
 const MODEL_KEY = "cupcat.chatModel";
-const EFFORT_KEY = "cupcat.chatEffort";
 function loadChoice(key: string): string {
   try {
     return localStorage.getItem(key) ?? "";
@@ -131,7 +130,6 @@ export interface EditorState {
   chatBusy: boolean;
   busyChatId: string; // conversation a run is streaming into (may differ from the viewed one)
   chatModel: string; // "" until the account's models are known — then the bridge's default
-  chatEffort: EffortLevel | ""; // "" = leave it to the model (the API's own default)
   agentHasKey: boolean; // Claude connected (subscription OAuth or key)
   claudeExpiresAt: number | null; // Claude OAuth token expiry (ms epoch)
   agentModels: ChatModel[];
@@ -182,7 +180,6 @@ let state: EditorState = {
   // Empty on purpose: the model is chosen from what the account actually has (see
   // fetchAgentStatus), not pinned to whichever id happened to be current when this shipped.
   chatModel: loadChoice(MODEL_KEY),
-  chatEffort: loadChoice(EFFORT_KEY) as EffortLevel | "",
   agentHasKey: false,
   claudeExpiresAt: null,
   agentModels: [],
@@ -815,16 +812,10 @@ export async function fetchAgentStatus(): Promise<void> {
     // instead of the picker staying stuck on whatever was current when the app was built.
     const current = state.chatModel;
     const model = models.some((m) => m.id === current) ? current : (j.defaultModel ?? models[0]?.id ?? "");
-    // Same for effort: a level the newly chosen model does not accept is dropped rather than sent.
-    const levels = models.find((m) => m.id === model)?.effortLevels ?? [];
-    const effort = levels.includes(state.chatEffort as EffortLevel) ? state.chatEffort : "";
-    if (model !== current) saveChoice(MODEL_KEY, model);
-    if (effort !== state.chatEffort) saveChoice(EFFORT_KEY, effort);
     setState({
       agentHasKey: !!j.hasKey,
       agentModels: models,
       chatModel: model,
-      chatEffort: effort,
       canGenerate: !!j.canGenerate,
       claudeExpiresAt: j.claude?.expiresAt ?? null,
     });
@@ -896,7 +887,6 @@ export async function sendChat(text: string): Promise<void> {
       body: JSON.stringify({
         messages,
         model: state.chatModel,
-        ...(state.chatEffort ? { effort: state.chatEffort } : {}),
         mentionedMediaRefs: mentioned,
         chatId: run.chatId,
       }),
@@ -1024,16 +1014,7 @@ export const ui = {
   clearAssets: () => setState({ selectedAssetIds: [] }),
   setChatModel: (m: string) => {
     saveChoice(MODEL_KEY, m);
-    // Effort levels are per-model: carrying "xhigh" onto a model that stops at "high" would be a
-    // 400 from the API, so a level the new model does not accept is cleared here.
-    const levels = state.agentModels.find((x) => x.id === m)?.effortLevels ?? [];
-    const effort = levels.includes(state.chatEffort as EffortLevel) ? state.chatEffort : "";
-    if (effort !== state.chatEffort) saveChoice(EFFORT_KEY, effort);
-    setState({ chatModel: m, chatEffort: effort });
-  },
-  setChatEffort: (e: EffortLevel | "") => {
-    saveChoice(EFFORT_KEY, e);
-    setState({ chatEffort: e });
+    setState({ chatModel: m });
   },
   // multi-clip selection
   toggleClip: (id: string, additive: boolean) =>
