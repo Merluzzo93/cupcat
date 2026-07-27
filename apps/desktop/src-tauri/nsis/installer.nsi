@@ -395,7 +395,31 @@ Function PageLeaveReinstall
 FunctionEnd
 
 ; 5. Choose install directory page
+;
+; CupCat writes about 1.5 GB, most of it one 550 MB speech model. NSIS does not check for room
+; before it starts extracting, so on a drive that is short of space the install dies partway
+; through with "Extract: error writing to file <biggest file>" - which reads like a corrupt
+; download and tells the user nothing they can act on. Check first, say the real numbers, and
+; leave them on this page so they can simply choose another drive.
+!define CUPCAT_REQUIRED_MB 2200   ; ~1.5 GB written + headroom for the shortcuts and uninstaller
+
+Function CupCatCheckSpace
+  ${GetRoot} "$INSTDIR" $9
+  ${DriveSpace} "$9\\" "/D=F /S=M" $8   ; free megabytes on the target drive
+  ; An unreadable drive (a path not yet created, a network location) returns empty: do not block on it.
+  ${If} $8 != ""
+    ${If} $8 < ${CUPCAT_REQUIRED_MB}
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "CupCat needs about ${CUPCAT_REQUIRED_MB} MB on $9 and that drive has $8 MB free.$$
+$$
+Choose another drive, or free up some space and try again. Installing anyway will fail partway through." IDOK cupcat_space_ok
+      Abort   ; stay on the directory page so another drive can be picked
+      cupcat_space_ok:
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE CupCatCheckSpace
 !insertmacro MUI_PAGE_DIRECTORY
 
 ; 6. Start menu shortcut page
