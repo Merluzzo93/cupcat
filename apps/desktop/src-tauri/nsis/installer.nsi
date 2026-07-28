@@ -682,6 +682,26 @@ Section WebView2
   ${EndIf}
 SectionEnd
 
+; CupCat runs a second process — the editor engine, cupcat-bridge.exe — that Tauri's own
+; "is the app running?" check knows nothing about, and which can outlive the app: if CupCat is
+; force-closed rather than asked politely, it never gets to stop its engine, and the orphan keeps
+; cupcat-bridge.exe open. Extraction then fails with "Error opening file for writing" and the
+; install stops half-done, leaving the app from one version beside the engine from another.
+;
+; Deliberately AFTER the running-app check, not before: killing the engine while CupCat is still
+; up only makes the app start a fresh one, which holds the file again. First the app goes, then
+; anything of it left behind.
+!macro CupCatCloseEngine
+  Push $R9
+  DetailPrint "Closing the CupCat engine..."
+  nsExec::Exec 'taskkill /F /IM cupcat-bridge.exe /T'
+  Pop $R9
+  nsExec::Exec 'taskkill /F /IM apply.exe /T'
+  Pop $R9
+  ; Windows frees the file a moment after the process goes, and extraction starts immediately.
+  Sleep 1500
+  Pop $R9
+!macroend
 Section Install
   SetOutPath $INSTDIR
 
@@ -690,6 +710,7 @@ Section Install
   !endif
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CupCatCloseEngine
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -827,6 +848,7 @@ Section Uninstall
   !endif
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CupCatCloseEngine
 
   ; Delete the app directory and its content from disk
   ; Copy main executable

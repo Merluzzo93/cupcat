@@ -68,15 +68,38 @@ function walk(root: string, dir = root, out: string[] = []): string[] {
 }
 
 /**
+ * The app binary AS THE INSTALLER SHIPS IT, pulled back out of the installer.
+ *
+ * Not target/release/cupcat.exe, which is a different file: tauri stamps the binary as part of
+ * bundling, and what makensis packed is not what is sitting there afterwards. Hashing the wrong one
+ * put a checksum in the manifest that no installed copy could ever match — measured on 1.7.28, where
+ * the installer shipped c62389… while the manifest and the published spare part both claimed
+ * 8271f3…. The manifest is a promise about what is installed, so it has to be taken from the thing
+ * that installs it.
+ */
+function appBinaryFromInstaller(version: string): string {
+  const setup = join(tauri, "target", "release", "bundle", "nsis", `CupCat_${version}_x64-setup.exe`);
+  if (!existsSync(setup)) throw new Error(`installer not found at ${setup} — run tauri build first`);
+  const out = join(tauri, "target", "release", "from-installer");
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
+  const sevenZip = "C:/Program Files/7-Zip/7z.exe";
+  if (!existsSync(sevenZip)) throw new Error(`7-Zip is needed to read the installer (${sevenZip})`);
+  const r = Bun.spawnSync([sevenZip, "e", "-y", `-o${out}`, setup, "cupcat.exe"]);
+  const app = join(out, "cupcat.exe");
+  if (r.exitCode !== 0 || !existsSync(app)) throw new Error(`could not read cupcat.exe out of ${setup}`);
+  return app;
+}
+
+/**
  * The files as they land in the install, mapped from where the build leaves them.
  *
- * The layout is the installer's, not the repo's: the sidecar binary loses its target triple, the
- * app comes from the Rust build, and everything under sidecars/ is copied as-is.
+ * The layout is the installer's, not the repo's: the sidecar binary loses its target triple, the app
+ * comes back out of the installer itself, and everything under sidecars/ is copied as-is.
  */
-function packagedFiles(): Map<string, string> {
+function packagedFiles(version: string): Map<string, string> {
   const out = new Map<string, string>();
-  const app = join(tauri, "target", "release", "cupcat.exe");
-  if (!existsSync(app)) throw new Error(`cupcat.exe not found at ${app} — run tauri build first`);
+  const app = appBinaryFromInstaller(version);
   out.set("cupcat.exe", app);
 
   const bridge = join(tauri, "binaries", "cupcat-bridge-x86_64-pc-windows-msvc.exe");
@@ -138,7 +161,7 @@ mkdirSync(deltaDir, { recursive: true });
 const files: ManifestFile[] = [];
 const changed: ManifestFile[] = [];
 const seenAssets = new Set<string>();
-for (const [rel, abs] of [...packagedFiles()].sort((a, b) => a[0].localeCompare(b[0]))) {
+for (const [rel, abs] of [...packagedFiles(version)].sort((a, b) => a[0].localeCompare(b[0]))) {
   const asset = assetNameFor(rel);
   if (seenAssets.has(asset)) throw new Error(`two files map to the same asset name: ${asset}`);
   seenAssets.add(asset);

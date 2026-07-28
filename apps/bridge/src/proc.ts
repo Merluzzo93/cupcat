@@ -14,6 +14,45 @@ export interface RunResult {
 // ICD manifest, required for libplacebo/Dolby Vision on driver installs that forgot to register it)
 // are registered here once and explicitly passed to every child from then on.
 const extraEnv: Record<string, string> = {};
+/**
+ * Stop when whatever started us is gone.
+ *
+ * The engine is a separate process that the app spawns and kills on its way out — but only if the
+ * app gets to exit in an orderly way. An installer killing CupCat outright does not give it that
+ * chance, and the engine is then an orphan: no window to serve, still holding the port, and still
+ * holding cupcat-bridge.exe open. That is not hypothetical. It has now broken two different things:
+ * a leftover engine kept the port and CupCat opened to a black window, and a leftover engine kept
+ * its own file locked so the installer could not overwrite it and the install died half-finished,
+ * with the app from one version and the engine from another.
+ *
+ * Both stop being possible if an orphan simply does not survive. Checked by asking the operating
+ * system whether the parent's id still exists — cheap, and every few seconds is soon enough.
+ *
+ * Only in a packaged install: in a dev checkout the parent is a shell, and a developer closing their
+ * terminal should not be told the engine has been orphaned.
+ */
+export function exitWithParent(enabled: boolean, everyMs = 5000): void {
+  if (!enabled) return;
+  const parent = process.ppid;
+  if (!parent || parent <= 0) return;
+  const timer = setInterval(() => {
+    let alive = true;
+    try {
+      // Signal 0 checks for existence without touching the process.
+      process.kill(parent, 0);
+    } catch {
+      alive = false;
+    }
+    if (!alive) {
+      clearInterval(timer);
+      console.error("[bridge] CupCat is gone; the engine is stopping rather than being left behind.");
+      process.exit(0);
+    }
+  }, everyMs);
+  // Never let this timer be the reason the process stays alive.
+  timer.unref?.();
+}
+
 export function addSpawnEnv(env: Record<string, string>): void {
   Object.assign(extraEnv, env);
 }

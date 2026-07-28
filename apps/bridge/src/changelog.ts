@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.29",
+    title: "Installing over an older CupCat works, and reports reach the developer",
+    points: [
+      "**\"Error opening file for writing: cupcat-bridge.exe\" during an install is fixed, and it was CupCat's fault twice over.** The editor engine is a second program, and when CupCat is force-closed — which is what an installer does — it never gets to stop it. The engine was left running with no window to serve, holding its own file open; the installer then could not overwrite that file and stopped halfway, leaving the app from one version beside the engine from another. Now the engine stops by itself the moment CupCat is gone, and the installer closes any engine still lingering from an older version before it writes anything.",
+      "**You can send a report straight from CupCat.** Feedback has always built a file on your disk and left you to send it; there is now a tick-box to hand it to the developer directly. It is off unless you turn it on, and it says plainly what goes: your description, the log, the project, and a picture of your whole screen. If sending fails the file is still on your disk and CupCat says so.",
+      "**A fresh install no longer looks out of date to itself.** The checksums published with a release described a build of the app that differed, byte for byte, from the one inside the installer — so an update could think a file needed fetching that was already correct. They are now taken from the installer itself, which is the only copy that matters.",
+    ],
+  },
+  {
     version: "1.7.28",
     title: "Dead air you can see, and the card that says what changed",
     points: [

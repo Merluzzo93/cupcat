@@ -10,7 +10,8 @@ import { listModels, loginWithUrl } from "./higgsfield";
 import { ensureDirs, loadProject } from "./media";
 import { runCli } from "./cli";
 import { startServer } from "./server";
-import { APPLY_FLAG, cleanupAfterUpdate, runApplyHelper } from "./delta";
+import { APPLY_FLAG, cleanupAfterUpdate, installRoot, runApplyHelper } from "./delta";
+import { exitWithParent } from "./proc";
 
 // Started as the update helper: no project, no server, no port. A copy of this binary is left in
 // .update and run with the app already quitting, precisely because a running .exe cannot be
@@ -41,6 +42,9 @@ if (verb && !verb.startsWith("-")) {
 
 installLogCapture(); // ring-buffer console output so feedback bundles can include logs.txt
 cleanupAfterUpdate(); // drop the previous copies of anything a finished update replaced
+// An engine that outlives CupCat has nothing to serve and holds two things hostage: the port, and
+// its own file — which is what makes an installer fail halfway through.
+exitWithParent(installRoot() !== null);
 await ensureDirs();
 const project = await loadProject();
 const doc = new EditorDocument(project);
