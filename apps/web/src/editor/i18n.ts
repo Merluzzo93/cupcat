@@ -111,6 +111,8 @@ const EN = {
   "update.staged": "Downloaded. Putting it in place…",
   "update.restarting": "CupCat is restarting to finish the update.",
   "update.failed": "Couldn't install it in place: {error}. The full installer still works.",
+  "update.showNotes": "What changes",
+  "update.hideNotes": "Hide",
 
   // ── setup banner ──
   "setup.title": "Setup",
@@ -595,6 +597,8 @@ const IT: Partial<Record<Key, string>> = {
   "update.staged": "Scaricato. Lo metto al suo posto…",
   "update.restarting": "CupCat si riavvia per completare l'aggiornamento.",
   "update.failed": "Non sono riuscito a installarlo qui: {error}. L'installer completo funziona comunque.",
+  "update.showNotes": "Cosa cambia",
+  "update.hideNotes": "Nascondi",
 
   "setup.title": "Configurazione",
   "setup.higgsfieldOff": "Higgsfield non è collegato — la generazione è disattivata.",

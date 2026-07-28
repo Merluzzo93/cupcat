@@ -71,6 +71,14 @@ function mb(bytes: number): string {
 // only one offered when installing in place is not possible.
 export function UpdateBanner() {
   const { update, updateDismissed, updateProgress } = useEditor();
+  // Every hook, before any early return. React counts them per render and throws the moment the
+  // count changes — and this component's first render is always the empty one, because whether an
+  // update exists is only known a second later. Below the return, that made the arrival of a
+  // release blank the entire window: the throw unmounts the whole tree, and CupCat opened black
+  // for everyone the instant something newer was published.
+  const [opening, setOpening] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+
   if (!update || updateDismissed) return null;
   const url = update.downloadUrl ?? update.releaseUrl ?? undefined;
   const delta = update.delta;
@@ -100,7 +108,6 @@ export function UpdateBanner() {
   // The engine opens it, not the page. Inside the desktop shell's webview window.open on an
   // external URL is ignored outright — the button looked like it did nothing at all — and
   // setting location.href would navigate the EDITOR to the download instead of the browser.
-  const [opening, setOpening] = useState(false);
   const open = async () => {
     if (!url) return;
     setOpening(true);
@@ -119,9 +126,17 @@ export function UpdateBanner() {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs text-teal-100">
+    <div className="border-b border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs text-teal-100">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <span className="font-semibold">{t("update.title")}</span>
       <span className="text-teal-200/90">{t("update.available", { version: update.latest })}</span>
+      {/* What you are agreeing to install. The notes were being fetched and thrown away, which left
+          the only honest answer to "what changes?" being to go and read the release page. */}
+      {update.notes && (
+        <button onClick={() => setShowNotes((s) => !s)} className="rounded px-1.5 py-1 text-teal-200/80 underline hover:text-teal-100">
+          {showNotes ? t("update.hideNotes") : t("update.showNotes")}
+        </button>
+      )}
       {delta && (
         <>
           <button
@@ -152,6 +167,12 @@ export function UpdateBanner() {
           ✕
         </button>
       </div>
+      </div>
+      {showNotes && update.notes && (
+        <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap border-t border-teal-500/20 pt-2 leading-relaxed text-teal-100/80">
+          {update.notes}
+        </p>
+      )}
     </div>
   );
 }

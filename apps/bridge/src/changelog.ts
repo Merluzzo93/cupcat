@@ -14,11 +14,12 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: "1.7.23",
-    title: "TEST UPDATE — this card is the proof that updating in place worked",
+    version: "1.7.24",
+    title: "CupCat opens again when there is an update waiting",
     points: [
-      "**If you are reading this, CupCat updated itself.** It downloaded about 112 MB instead of a 1 GB installer, put the new files in place, and restarted — on its own. This entry exists only to be visible; it is removed in the next version.",
-      "**CupCat now keeps checking for updates while it is open.** Checking only at startup meant an editor left open all day never heard about a release until it was next launched.",
+      "**A published update no longer opens CupCat to a black window.** The update notice asked React for one more piece of state than the render before it — legal-looking code that throws the instant a notice appears, and a throw with nothing to catch it empties the whole window. So CupCat worked perfectly until something newer existed, and then opened black for everyone. The notice now sets itself up before it decides whether to appear.",
+      "**And a part of the interface failing can no longer take the window with it.** Whatever breaks, the window stays, says what happened and offers to reload — instead of a black rectangle that looks exactly like a broken install and says nothing. A black window has now had two unrelated causes; this closes the whole class.",
+      "**CupCat keeps checking for updates while it is open.** Checking only at startup meant an editor left open all day never heard about a release until it was next launched.",
     ],
   },
   {
