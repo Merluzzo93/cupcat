@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.25",
+    title: "You can read what an update contains before installing it",
+    points: [
+      "**The update notice now shows what changes.** The release notes were already being fetched and then thrown away, so the only honest answer to \"what am I about to install?\" was to go and read the release page. Press **Cosa cambia** in the notice and they are there.",
+      "**And this update installed itself** — downloading only the two files that actually differ, about 112 MB against a 1.4 GB installer, leaving the speech model, ffmpeg and the voices exactly where they were.",
+    ],
+  },
+  {
     version: "1.7.24",
     title: "CupCat opens again when there is an update waiting",
     points: [
