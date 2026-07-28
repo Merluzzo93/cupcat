@@ -15,7 +15,8 @@ import { audioPeaks, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, isHeav
 import { mediaPathFor, saveProject } from "./media";
 import { cancelJob, currentJob_, killTagged, openInBrowser } from "./proc";
 import { claudeInstalled, installClaudeCode, startClaudeLogin, submitClaudeCode } from "./claude-code";
-import { checkForUpdate } from "./update";
+import { checkForUpdate, pendingPlan } from "./update";
+import { applyUpdate } from "./delta";
 import { setProgressSink } from "./progress";
 import { createProject, deleteProject, listProjects, switchProject } from "./projects";
 
@@ -242,6 +243,9 @@ export function startServer(ctx: BridgeContext) {
   }
 }
 
+/** An install in place is under way. Guards against a second click starting a second download. */
+let updating = false;
+
 function serve(
   ctx: BridgeContext,
   clients: Set<Sendable>,
@@ -273,6 +277,21 @@ function serve(
       // In-app update check: compares the running build with the latest GitHub release. Returns
       // "no update" while the repo is private; starts working once releases are public.
       if (path === "/update/check") return Response.json(await checkForUpdate(), { headers: cors });
+
+      // Install in place: download only the files that differ, then quit so they can be swapped in
+      // and CupCat restarted. Progress goes out over the socket — the request itself returns at once,
+      // because the process it starts ends with this process exiting.
+      if (path === "/update/install" && req.method === "POST") {
+        if (!originAllowed(req)) return new Response("Forbidden origin", { status: 403 });
+        const plan = pendingPlan();
+        if (!plan) return Response.json({ ok: false, error: "no update is ready to install" }, { headers: cors });
+        if (updating) return Response.json({ ok: false, error: "already installing" }, { headers: cors });
+        updating = true;
+        void applyUpdate(plan, (p) => broadcastRaw({ type: "update-progress", ...p })).finally(() => {
+          updating = false;
+        });
+        return Response.json({ ok: true, files: plan.files.length, bytes: plan.bytes }, { headers: cors });
+      }
 
       // Project picker: list projects, or create/switch (reloads the document → broadcasts new state).
       if (path === "/projects") {

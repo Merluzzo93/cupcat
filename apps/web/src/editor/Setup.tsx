@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { t } from "./i18n";
-import { BRIDGE_HTTP, dismissUpdate, higgsfieldLogin, useEditor } from "./store";
+import { BRIDGE_HTTP, dismissUpdate, higgsfieldLogin, installUpdate, useEditor } from "./store";
 
 const CLAUDE_CMD = "claude mcp add --transport http cupcat http://127.0.0.1:19789/mcp";
 
@@ -54,12 +54,49 @@ export function SetupBanner() {
   );
 }
 
-// Shown when the bridge finds a newer GitHub release. The button opens the installer's download
-// (the -setup.exe asset, or the release page as fallback) in the system browser.
+/** "112 MB", "1.4 GB", "0.4 MB" — enough to answer "is this quick or is this a coffee". Small
+ * updates keep a decimal, because rounding a 400 KB fix to "0 MB" reads as broken. */
+function mb(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e7) return `${Math.round(bytes / 1e6)} MB`;
+  return `${(bytes / 1e6).toFixed(1)} MB`;
+}
+
+// Shown when the bridge finds a newer GitHub release.
+//
+// Two ways forward. When the release can be installed in place — the normal case for anyone already
+// running CupCat — the first button downloads only the files that actually changed (about 110 MB
+// against a 1.4 GB installer, because the speech model and ffmpeg are the same as the ones already
+// on disk) and CupCat restarts itself. The installer download stays as the second option, and is the
+// only one offered when installing in place is not possible.
 export function UpdateBanner() {
-  const { update, updateDismissed } = useEditor();
+  const { update, updateDismissed, updateProgress } = useEditor();
   if (!update || updateDismissed) return null;
   const url = update.downloadUrl ?? update.releaseUrl ?? undefined;
+  const delta = update.delta;
+  const p = updateProgress;
+
+  // Once it is under way the banner belongs to the update: no dismiss, no second button to press.
+  if (p && p.phase !== "error") {
+    const pct = p.bytesTotal > 0 ? Math.min(100, Math.round((p.bytesDone / p.bytesTotal) * 100)) : 0;
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs text-teal-100">
+        <span className="font-semibold">{t("update.title")}</span>
+        <span className="text-teal-200/90">
+          {p.phase === "download"
+            ? t("update.installing", { file: p.file ?? "", done: mb(p.bytesDone), total: mb(p.bytesTotal) })
+            : p.phase === "staged"
+              ? t("update.staged")
+              : t("update.restarting")}
+        </span>
+        {p.phase === "download" && (
+          <div className="h-1.5 w-40 overflow-hidden rounded-full bg-teal-500/20" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-full rounded-full bg-teal-400 transition-[width] duration-200" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+      </div>
+    );
+  }
   // The engine opens it, not the page. Inside the desktop shell's webview window.open on an
   // external URL is ignored outright — the button looked like it did nothing at all — and
   // setting location.href would navigate the EDITOR to the download instead of the browser.
@@ -85,11 +122,31 @@ export function UpdateBanner() {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs text-teal-100">
       <span className="font-semibold">{t("update.title")}</span>
       <span className="text-teal-200/90">{t("update.available", { version: update.latest })}</span>
+      {delta && (
+        <>
+          <button
+            onClick={() => void installUpdate()}
+            className="rounded bg-teal-500 px-2.5 py-1 font-medium text-teal-950 hover:bg-teal-400"
+          >
+            {t("update.install", { size: mb(delta.bytes) })}
+          </button>
+          <span className="text-teal-200/60">{t("update.insteadOf", { size: mb(delta.fullBytes) })}</span>
+        </>
+      )}
       {url && (
-        <button onClick={() => void open()} disabled={opening} className="rounded bg-teal-500 disabled:opacity-60 px-2.5 py-1 font-medium text-teal-950 hover:bg-teal-400">
+        <button
+          onClick={() => void open()}
+          disabled={opening}
+          className={
+            delta
+              ? "rounded px-2.5 py-1 font-medium text-teal-200/80 underline hover:text-teal-100 disabled:opacity-60"
+              : "rounded bg-teal-500 px-2.5 py-1 font-medium text-teal-950 hover:bg-teal-400 disabled:opacity-60"
+          }
+        >
           {opening ? t("update.opening") : t("update.download")}
         </button>
       )}
+      {p?.phase === "error" && <span className="text-amber-200">{t("update.failed", { error: p.error ?? "" })}</span>}
       <div className="ml-auto flex items-center gap-2">
         <button onClick={dismissUpdate} className="rounded px-2 py-1 hover:bg-teal-500/20" aria-label={t("update.dismiss")}>
           ✕

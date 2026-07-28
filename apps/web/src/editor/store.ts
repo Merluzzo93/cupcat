@@ -118,8 +118,19 @@ export interface EditorState {
   claudeLoginBusy: boolean;
   claudeLoginProgress: string | null; // latest status line from the official Claude sign-in
   claudeCodeNeeded: boolean; // the login is waiting for the code the user pastes from the browser
-  update: { latest: string; downloadUrl: string | null; releaseUrl: string | null; notes: string | null } | null; // newer GitHub release
+  update: {
+    latest: string;
+    downloadUrl: string | null;
+    releaseUrl: string | null;
+    notes: string | null;
+    /** Set when this one can be installed in place, downloading only what differs. Null means the
+     * full installer is the only route — which every install always has. */
+    delta: { files: number; bytes: number; fullBytes: number } | null;
+  } | null; // newer GitHub release
   updateDismissed: boolean;
+  /** Live progress of an in-place install, from the moment the button is pressed until the app goes
+   * down to be swapped. */
+  updateProgress: { phase: "download" | "staged" | "restarting" | "error"; file?: string; bytesDone: number; bytesTotal: number; error?: string } | null;
   toolProgress: { tool: string; text: string } | null; // live phase of a long-running tool (auto_clips…)
   lang: Lang; // interface language; kept in state so a change re-renders every component
   langChosen: boolean; // false until the user picks one → show the first-run picker
@@ -168,6 +179,7 @@ let state: EditorState = {
   claudeCodeNeeded: false,
   update: null,
   updateDismissed: false,
+  updateProgress: null,
   toolProgress: null,
   lang: getLang(),
   langChosen: storedLang() !== null,
@@ -253,6 +265,7 @@ let cmdSeq = 0;
 let socket: WebSocket | null = null;
 let connecting = false;
 let statusPoll: ReturnType<typeof setInterval> | null = null;
+let updatePoll: ReturnType<typeof setInterval> | null = null;
 
 /** Retry, backing off a little so a busy engine isn't hammered, but never giving up. */
 function scheduleReconnect(): void {
@@ -316,6 +329,9 @@ export function connectBridge(force = false): void {
     void checkForUpdate(); // prompt to download when a newer GitHub release exists
     // Keep Claude/Higgsfield connection status live so the services always show as connected.
     if (!statusPoll) statusPoll = setInterval(() => void fetchAgentStatus(), 25000);
+    // And keep looking. Checking only at startup means an editor left open across a working day —
+    // which is how CupCat is actually used — never hears about a release until it is next launched.
+    if (!updatePoll) updatePoll = setInterval(() => void checkForUpdate(), 30 * 60 * 1000);
   };
   sock.onclose = () => {
     window.clearTimeout(giveUp);
@@ -375,6 +391,18 @@ export function connectBridge(force = false): void {
         if (msg.state === "building") next[msg.assetId] = { state: "building", percent: Number(msg.percent) || 0 };
         else delete next[msg.assetId];
         setState({ previewStatus: next });
+      } else if (msg.type === "update-progress" && typeof msg.phase === "string") {
+        // The engine exits on purpose at the end of this, so the socket dropping right after
+        // "restarting" is the update working, not the engine dying — the banner says so.
+        setState({
+          updateProgress: {
+            phase: msg.phase as "download" | "staged" | "restarting" | "error",
+            file: typeof msg.file === "string" ? msg.file : undefined,
+            bytesDone: Number(msg.bytesDone) || 0,
+            bytesTotal: Number(msg.bytesTotal) || 0,
+            error: typeof msg.error === "string" ? msg.error : undefined,
+          },
+        });
       } else if (msg.type === "claude-login-progress" && typeof msg.text === "string") {
         setState({ claudeLoginProgress: msg.text });
       } else if (msg.type === "claude-login-error" && typeof msg.text === "string") {
@@ -639,12 +667,37 @@ export async function sendFeedback(type: string, description: string): Promise<{
 export async function checkForUpdate(): Promise<void> {
   try {
     const r = await fetch(`${BRIDGE_HTTP}/update/check`);
-    const j = (await r.json()) as { updateAvailable?: boolean; latest?: string; downloadUrl?: string | null; releaseUrl?: string | null; notes?: string | null };
+    const j = (await r.json()) as {
+      updateAvailable?: boolean;
+      latest?: string;
+      downloadUrl?: string | null;
+      releaseUrl?: string | null;
+      notes?: string | null;
+      delta?: { files: number; bytes: number; fullBytes: number } | null;
+    };
     if (j.updateAvailable && j.latest) {
-      setState({ update: { latest: j.latest, downloadUrl: j.downloadUrl ?? null, releaseUrl: j.releaseUrl ?? null, notes: j.notes ?? null } });
+      setState({
+        update: { latest: j.latest, downloadUrl: j.downloadUrl ?? null, releaseUrl: j.releaseUrl ?? null, notes: j.notes ?? null, delta: j.delta ?? null },
+      });
     }
   } catch {
     /* offline / private repo — no update prompt */
+  }
+}
+
+/**
+ * Install the update in place: only the files that differ come down, and CupCat restarts itself to
+ * finish. Progress arrives over the socket; this returns as soon as the download has started, since
+ * the engine ends the job by exiting.
+ */
+export async function installUpdate(): Promise<void> {
+  setState({ updateProgress: { phase: "download", bytesDone: 0, bytesTotal: state.update?.delta?.bytes ?? 0 } });
+  try {
+    const r = await fetch(`${BRIDGE_HTTP}/update/install`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const j = (await r.json()) as { ok?: boolean; error?: string };
+    if (!j.ok) setState({ updateProgress: { phase: "error", bytesDone: 0, bytesTotal: 0, error: j.error ?? "unknown" } });
+  } catch (e) {
+    setState({ updateProgress: { phase: "error", bytesDone: 0, bytesTotal: 0, error: e instanceof Error ? e.message : String(e) } });
   }
 }
 

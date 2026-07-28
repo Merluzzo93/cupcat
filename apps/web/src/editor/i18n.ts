@@ -105,6 +105,12 @@ const EN = {
   "update.download": "Download the new version",
   "update.opening": "Opening…",
   "update.dismiss": "Dismiss",
+  "update.install": "Install now ({size})",
+  "update.insteadOf": "instead of {size}",
+  "update.installing": "Downloading {file} — {done} of {total}",
+  "update.staged": "Downloaded. Putting it in place…",
+  "update.restarting": "CupCat is restarting to finish the update.",
+  "update.failed": "Couldn't install it in place: {error}. The full installer still works.",
 
   // ── setup banner ──
   "setup.title": "Setup",
@@ -583,6 +589,12 @@ const IT: Partial<Record<Key, string>> = {
   "update.download": "Scarica la nuova versione",
   "update.opening": "Apro…",
   "update.dismiss": "Chiudi",
+  "update.install": "Installa ora ({size})",
+  "update.insteadOf": "invece di {size}",
+  "update.installing": "Scarico {file} — {done} di {total}",
+  "update.staged": "Scaricato. Lo metto al suo posto…",
+  "update.restarting": "CupCat si riavvia per completare l'aggiornamento.",
+  "update.failed": "Non sono riuscito a installarlo qui: {error}. L'installer completo funziona comunque.",
 
   "setup.title": "Configurazione",
   "setup.higgsfieldOff": "Higgsfield non è collegato — la generazione è disattivata.",

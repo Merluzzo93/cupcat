@@ -125,6 +125,15 @@ async fn supervise(app: tauri::AppHandle, shutting_down: Arc<AtomicBool>, log_pa
         //
         // Only one CupCat window can exist (single-instance), so any engine we did not start is an
         // orphan with no window to serve. Take the port from it and carry on.
+        // Exit code 7 means an update has been downloaded, checked, and staged, and a helper is
+        // already waiting for us to let go of cupcat.exe so it can put the new files in place and
+        // start us again. Windows will not overwrite a running program, so quitting IS the update:
+        // respawning the engine here would keep the app alive and the helper waiting forever.
+        if exit_code == Some(7) {
+            shutting_down.store(true, Ordering::SeqCst);
+            app.exit(0);
+            break;
+        }
         if exit_code == Some(3) {
             if takeovers < 3 {
                 takeovers += 1;

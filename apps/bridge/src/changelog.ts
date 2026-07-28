@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.22",
+    title: "Updates install themselves, and download about a tenth of what they used to",
+    points: [
+      "**An update now installs itself, and only downloads what changed.** Every update so far meant fetching the whole 1 GB installer and reinstalling everything — including the 547 MB speech model, which has not changed in months and was already on your disk. CupCat now compares what it has against what the release contains, file by file, and fetches only the difference: **about 110 MB instead of 1.4 GB**. Press Install, watch the bar, and it restarts itself finished. The full installer is still there for a new machine, and still one click away if you would rather have it.",
+      "**Nothing is put in place until all of it has arrived and been checked.** Each file is verified against the checksum published with the release, and the swap happens with CupCat closed — Windows will not overwrite a program while it runs. If any part of it fails, everything goes back exactly as it was, because a new app over an old engine is an app that does not open.",
+    ],
+  },
+  {
     version: "1.7.21",
     title: "It opens again after an update, and a dissolve actually dissolves",
     points: [

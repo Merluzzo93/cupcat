@@ -10,6 +10,15 @@ import { listModels, loginWithUrl } from "./higgsfield";
 import { ensureDirs, loadProject } from "./media";
 import { runCli } from "./cli";
 import { startServer } from "./server";
+import { APPLY_FLAG, cleanupAfterUpdate, runApplyHelper } from "./delta";
+
+// Started as the update helper: no project, no server, no port. A copy of this binary is left in
+// .update and run with the app already quitting, precisely because a running .exe cannot be
+// overwritten — it waits for CupCat to go, swaps the files, and starts it again. It must come first,
+// before anything below opens a project or claims the port.
+if (process.argv[2] === APPLY_FLAG && process.argv[3]) {
+  process.exit(await runApplyHelper(process.argv[3]));
+}
 
 // The engine must outlive any single bad operation. One tool throwing — a malformed file, an
 // ffmpeg that dies oddly, a rejected promise nobody awaited — used to be able to take down the whole
@@ -31,6 +40,7 @@ if (verb && !verb.startsWith("-")) {
 }
 
 installLogCapture(); // ring-buffer console output so feedback bundles can include logs.txt
+cleanupAfterUpdate(); // drop the previous copies of anything a finished update replaced
 await ensureDirs();
 const project = await loadProject();
 const doc = new EditorDocument(project);
