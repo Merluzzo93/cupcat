@@ -32,9 +32,12 @@ export interface ManifestFile {
   path: string;
   size: number;
   sha256: string;
-  /** The release whose assets carry THIS content — not necessarily the newest one. A file that
+  /** The release TAG whose assets carry THIS content — not necessarily the newest one. A file that
    * last changed three releases ago is still downloadable, without every release having to re-upload
-   * 1.5 GB of unchanged tools. */
+   * 1.5 GB of unchanged tools.
+   *
+   * A tag, not a version: a small fix can be published into the release that is already there, in
+   * which case the version moves and the tag does not. They coincided until that became possible. */
   since: string;
   /** Exact asset name under that release. Stored rather than derived so no path-encoding scheme has
    * to be agreed on by two pieces of code. */
@@ -237,8 +240,8 @@ function assetUrl(rel: GhRelease | null, name: string): string | null {
 }
 
 /** The manifest published with a release, or null when that release predates in-place updating. */
-export async function fetchManifest(version: string): Promise<Manifest | null> {
-  const rel = await getRelease(`v${version.replace(/^v/i, "")}`);
+export async function fetchManifest(tag: string): Promise<Manifest | null> {
+  const rel = await getRelease(tagOf(tag));
   const url = assetUrl(rel, MANIFEST_ASSET);
   if (!url) return null;
   try {
@@ -261,6 +264,8 @@ export interface UpdatePlan {
   bytes: number;
   /** Bytes the full installer would have been, for the comparison the user actually cares about. */
   fullBytes: number;
+  /** The release the manifest came from — where a file that names no other release is fetched. */
+  hostTag: string;
 }
 
 /**
@@ -275,33 +280,38 @@ export function changedFiles(remote: Manifest, local: Map<string, string>): Mani
   return remote.files.filter((f) => local.get(f.path) !== f.sha256);
 }
 
+/** "1.7.28" and "v1.7.28" both mean the tag v1.7.28. Manifests written before tags and versions
+ * could differ carry the bare version in `since`. */
+function tagOf(s: string): string {
+  return /^v/i.test(s) ? s : `v${s}`;
+}
+
 /**
- * What it would take to become `version`, or null when updating in place is not possible — which is
+ * What it would take to reach the published state, or null when updating in place is not possible —
  * a perfectly good answer: the caller falls back to the full installer, which always works.
  *
- * Null happens when this is not a packaged install, when the install is not writable, when the
- * release published no manifest (anything before 1.7.22), or when a file we need was last changed in
- * a release that did not publish individual files. Never when something merely went wrong.
+ * `hostTag` is the release the manifest came from, and is where a file whose entry names no other
+ * release is looked for. Null happens when this is not a packaged install, when the install is not
+ * writable, or when a file we need was last changed in a release that published no individual files.
+ * Never when something merely went wrong.
  */
-export async function planUpdate(version: string): Promise<UpdatePlan | null> {
+export async function planUpdate(remote: Manifest, hostTag: string): Promise<UpdatePlan | null> {
   const root = installRoot();
   if (!root || !isWritable(root)) return null;
-
-  const remote = await fetchManifest(version);
   if (!remote || remote.files.length === 0) return null;
 
   const local = await localFiles(root);
   const need = changedFiles(remote, local);
   const fullBytes = remote.files.reduce((n, f) => n + f.size, 0);
-  if (need.length === 0) return { version: remote.version, files: [], bytes: 0, fullBytes };
+  if (need.length === 0) return { version: remote.version, files: [], bytes: 0, fullBytes, hostTag };
 
   // Every file has to be reachable before anything is offered — half an update is worse than none.
-  const wanted = new Set(need.map((f) => f.since));
-  for (const since of wanted) await getRelease(`v${since}`);
+  const where = (f: ManifestFile) => tagOf(f.since || hostTag);
+  for (const tag of new Set(need.map(where))) await getRelease(tag);
   for (const f of need) {
-    if (!assetUrl(releases.get(`v${f.since}`) ?? null, f.asset)) return null;
+    if (!assetUrl(releases.get(where(f)) ?? null, f.asset)) return null;
   }
-  return { version: remote.version, files: need, bytes: need.reduce((n, f) => n + f.size, 0), fullBytes };
+  return { version: remote.version, files: need, bytes: need.reduce((n, f) => n + f.size, 0), fullBytes, hostTag };
 }
 
 // ---------------------------------------------------------------------------- doing it
@@ -343,8 +353,9 @@ async function stage(root: string, plan: UpdatePlan, onProgress: (p: UpdateProgr
   };
 
   for (const f of plan.files) {
-    const url = assetUrl(releases.get(`v${f.since}`) ?? null, f.asset);
-    if (!url) throw new Error(`${f.path} is not published in ${f.since}`);
+    const tag = tagOf(f.since || plan.hostTag);
+    const url = assetUrl(releases.get(tag) ?? null, f.asset);
+    if (!url) throw new Error(`${f.path} is not published in ${tag}`);
     const res = await fetch(url, { headers: { "user-agent": "CupCat-Updater" }, signal: AbortSignal.timeout(600_000) });
     if (!res.ok || !res.body) throw new Error(`couldn't download ${f.path} (${res.status})`);
 

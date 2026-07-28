@@ -1245,6 +1245,12 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
   // While true the dialog renders nothing, so the bridge's full-screen screenshot captures the app
   // underneath instead of this feedback modal. The submit promise keeps running meanwhile.
   const [capturing, setCapturing] = useState(false);
+  // Whether to hand the bundle to the developer. Off by default and stated plainly: it carries a
+  // picture of whatever is on screen and the whole project, which is not something to send on
+  // someone's behalf without them choosing to.
+  const [share, setShare] = useState(false);
+  const [sent, setSent] = useState<boolean | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const inputCls = "w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 outline-none";
 
   const submit = async () => {
@@ -1257,10 +1263,16 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
     await new Promise(requestAnimationFrame);
     await new Promise(requestAnimationFrame);
     await new Promise((r) => setTimeout(r, 400));
-    const res = await sendFeedback(type, description.trim());
+    const res = await sendFeedback(type, description.trim(), share);
     setCapturing(false);
     setBusy(false);
-    if (res.ok && res.path) setPath(res.path);
+    if (res.ok && res.path) {
+      setPath(res.path);
+      if (share) {
+        setSent(!!res.sent);
+        setSendError(res.sendError ?? null);
+      }
+    }
     else setError(res.error || t("feedback.failed"));
   };
 
@@ -1301,13 +1313,22 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
               />
             </label>
             <p className="text-[11px] text-neutral-500">{t("feedback.includes")}</p>
+            {/* Opt-in, never pre-ticked: this sends a picture of whatever is on screen and the whole
+                project off the machine, and the sentence next to the box says exactly that. */}
+            <label className="flex items-start gap-2 rounded-md border border-neutral-800 bg-neutral-950/60 p-2">
+              <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} disabled={busy} className="mt-0.5" />
+              <span>
+                <span className="block text-neutral-200">{t("fb.shareLabel")}</span>
+                <span className="block text-[11px] text-neutral-500">{t("fb.shareHint")}</span>
+              </span>
+            </label>
             {error && <div className="rounded border border-red-900 bg-red-950/40 p-2 text-red-300">{error}</div>}
             <button
               onClick={() => void submit()}
               disabled={busy || !description.trim()}
               className="w-full rounded-md bg-neutral-200 px-3 py-2 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
             >
-              {busy ? t("feedback.creating") : t("feedback.create")}
+              {busy ? (share ? t("fb.sending") : t("feedback.creating")) : share ? t("fb.createAndSend") : t("feedback.create")}
             </button>
           </>
         ) : (
@@ -1315,7 +1336,14 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
             <div className="rounded border border-emerald-900 bg-emerald-950/30 p-2 text-emerald-200">
               {t("feedback.created")} <span className="select-all break-all font-mono text-[11px]">{path}</span>
             </div>
-            <p className="text-neutral-400">Invialo allo sviluppatore (mail, chat…) allegando il file.</p>
+            {sent === true ? (
+              <p className="rounded border border-teal-900 bg-teal-950/40 p-2 text-teal-300">{t("fb.sentOk")}</p>
+            ) : (
+              <>
+                {sent === false && <p className="rounded border border-amber-900 bg-amber-950/40 p-2 text-amber-300">{t("fb.sentFailed", { error: sendError ?? "" })}</p>}
+                <p className="text-neutral-400">{t("fb.sendYourself")}</p>
+              </>
+            )}
             <button onClick={copyPath} className="w-full rounded-md bg-neutral-200 px-3 py-2 font-medium text-neutral-900 hover:bg-white">
               {copied ? "Copiato ✓" : "Copia percorso"}
             </button>

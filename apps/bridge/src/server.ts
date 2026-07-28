@@ -9,7 +9,7 @@ import { entriesBetween } from "./changelog";
 import { loadDiarization } from "./diarize";
 import { ensureCompoundBake } from "./export";
 import { type BridgeContext, executeTool, importFolderMedia } from "./executor";
-import { createFeedbackBundle } from "./feedback";
+import { createFeedbackBundle, sendFeedbackBundle } from "./feedback";
 import { handleRpc, type RpcMessage } from "./mcp-http";
 import { audioPeaks, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, isHeavySource, type PreviewState, proxyProgress, scrubProxyPath, setProxyWatcher } from "./ffmpeg";
 import { mediaPathFor, saveProject } from "./media";
@@ -417,9 +417,9 @@ function serve(
       // on disk and answer with the path the user should send to the developer.
       if (path === "/feedback" && req.method === "POST") {
         if (!originAllowed(req)) return new Response("Forbidden origin", { status: 403 });
-        let body: { type?: string; description?: string };
+        let body: { type?: string; description?: string; send?: boolean };
         try {
-          body = (await req.json()) as { type?: string; description?: string };
+          body = (await req.json()) as { type?: string; description?: string; send?: boolean };
         } catch {
           return new Response("Bad request", { status: 400 });
         }
@@ -431,7 +431,18 @@ function serve(
             description,
             projectJson: JSON.stringify(ctx.doc.project, null, 2),
           });
-          return Response.json({ ok: true, path: bundle }, { headers: cors });
+          // Sending is a separate, explicit act: the bundle holds a picture of whatever was on
+          // screen and the whole project, so it only leaves the machine when asked, and a failure
+          // to send is not a failure to report — the file is on disk either way.
+          let sent: { ok: boolean; error?: string } | null = null;
+          if (body.send === true) {
+            sent = await sendFeedbackBundle(bundle, {
+              type: typeof body.type === "string" ? body.type : "other",
+              description,
+              version: CUPCAT_VERSION,
+            });
+          }
+          return Response.json({ ok: true, path: bundle, sent: sent?.ok ?? false, sendError: sent?.error ?? null }, { headers: cors });
         } catch (e) {
           return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500, headers: cors });
         }

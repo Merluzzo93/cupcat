@@ -1037,6 +1037,50 @@ export async function analyzeVideo(url: string, opts: { sceneThreshold?: number;
   return out;
 }
 
+/**
+ * Detect ranges where the PICTURE stops moving, via ffmpeg `freezedetect`.
+ *
+ * The counterpart to silence: footage with no speech — a screen recording, a locked-off camera, a
+ * phone left running — has dead air too, and none of it can be found by listening. `toleranceDb` is
+ * how different two frames may be and still count as the same picture, and it is the whole game.
+ * Measured on constructed cases (a true freeze, a slow pan, static shots with grain):
+ *
+ *     −60 dB  only pixel-identical frames — held frames, screen recordings with nothing happening
+ *     −40 dB  also static camera footage with mild grain; a slow pan is still correctly "moving"
+ *     −35 dB  also visibly grainy footage
+ *     −30 dB  a SLOW PAN starts registering as frozen — past this it eats footage worth keeping
+ *
+ * Hence the −40 dB default: cutting something the user wanted is far worse than missing a pause.
+ *
+ * `durationSeconds` closes a freeze that runs to the end of the file. ffmpeg reports the start of
+ * that one and never its end — which is precisely the "recording left running" case, the most worth
+ * catching and the easiest to drop by accident.
+ */
+export async function videoStills(url: string, toleranceDb: number, minDur: number, durationSeconds?: number): Promise<SilenceRange[]> {
+  const { stderr } = await run(FFMPEG_BIN, [
+    "-i", url,
+    "-map", "0:v:0",
+    "-vf", `freezedetect=n=${toleranceDb}dB:d=${minDur}`,
+    "-an",
+    "-f", "null", "-",
+  ]);
+  const ranges: SilenceRange[] = [];
+  let start: number | null = null;
+  for (const line of stderr.split("\n")) {
+    const ms = line.match(/freeze_start:\s*(-?[0-9.]+)/);
+    const me = line.match(/freeze_end:\s*(-?[0-9.]+)/);
+    if (ms) start = Math.max(0, Number.parseFloat(ms[1]!));
+    else if (me && start !== null) {
+      ranges.push({ startSeconds: start, endSeconds: Number.parseFloat(me[1]!) });
+      start = null;
+    }
+  }
+  if (start !== null && durationSeconds && durationSeconds > start) {
+    ranges.push({ startSeconds: start, endSeconds: durationSeconds });
+  }
+  return ranges;
+}
+
 /** Detect silent ranges via ffmpeg `silencedetect` (parses its stderr log).
  * `-vn` matters: without it ffmpeg's automatic stream selection also decodes the whole video track
  * for the null muxer — minutes of wasted CPU on a long file, for a measurement that reads only audio. */

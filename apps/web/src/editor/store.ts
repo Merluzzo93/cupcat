@@ -649,15 +649,19 @@ export async function downloadFile(url: string, filename?: string): Promise<void
 
 /** Ask the bridge to build a feedback/diagnostic package (report + screenshot + project + logs)
  * on disk; returns the created path (zip or folder) the user should send to the developer. */
-export async function sendFeedback(type: string, description: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+export async function sendFeedback(
+  type: string,
+  description: string,
+  send = false,
+): Promise<{ ok: boolean; path?: string; sent?: boolean; sendError?: string | null; error?: string }> {
   try {
     const r = await fetch(`${BRIDGE_HTTP}/feedback`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type, description }),
+      body: JSON.stringify({ type, description, send }),
     });
-    const j = (await r.json()) as { ok?: boolean; path?: string; error?: string };
-    return { ok: !!j.ok, path: j.path, error: j.error };
+    const j = (await r.json()) as { ok?: boolean; path?: string; sent?: boolean; sendError?: string | null; error?: string };
+    return { ok: !!j.ok, path: j.path, sent: !!j.sent, sendError: j.sendError ?? null, error: j.error };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

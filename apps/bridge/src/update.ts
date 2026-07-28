@@ -5,7 +5,7 @@
 // public. Best-effort throughout: a network failure never surfaces an error to the user.
 
 import { CUPCAT_VERSION, GITHUB_API, GITHUB_REPO } from "./config";
-import { planUpdate, type UpdatePlan } from "./delta";
+import { fetchManifest, planUpdate, type UpdatePlan } from "./delta";
 
 /** What updating in place would cost, when it is possible at all. Null means the full installer is
  * the only route — an unpackaged or read-only install, a release with no manifest, or simply being
@@ -79,15 +79,26 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
 
     const setup = rel.assets?.find((a) => /setup\.exe$/i.test(a.name ?? "") && a.browser_download_url);
     const downloadUrl = setup?.browser_download_url ?? rel.html_url ?? null;
-    const updateAvailable = isNewer(tag, CUPCAT_VERSION);
-    const latest = tag.replace(/^v/i, "");
+
+    // The version comes from the manifest, not from the tag.
+    //
+    // A release is a container of files, and a small fix does not need one of its own: replacing the
+    // manifest and the two changed binaries inside the release that is already there publishes it to
+    // everyone running CupCat, while the page — and the installer on it — stay put. Reading the tag
+    // instead would make that invisible, because the tag is exactly what does not change. Releases
+    // are then for the updates that deserve a page, not for every fix.
+    //
+    // Falls back to the tag for releases published before manifests existed.
+    const manifest = await fetchManifest(tag);
+    const latest = (manifest?.version ?? tag).replace(/^v/i, "");
+    const updateAvailable = isNewer(latest, CUPCAT_VERSION);
 
     // Work out whether this one can be installed in place, downloading only what differs. Best-effort
     // like the rest of the check: if it cannot be worked out, the installer link stands on its own.
     plan = null;
-    if (updateAvailable) {
+    if (updateAvailable && manifest) {
       try {
-        const p = await planUpdate(latest);
+        const p = await planUpdate(manifest, tag);
         if (p && p.files.length > 0) plan = p;
       } catch {
         /* fall back to the full installer */

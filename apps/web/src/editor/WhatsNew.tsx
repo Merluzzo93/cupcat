@@ -35,6 +35,26 @@ function Rich({ text }: { text: string }) {
   );
 }
 
+/**
+ * The running version, once the engine can say. Keeps asking for up to a minute — the engine is a
+ * separate process and takes a moment to start, and after an update in place it is starting from
+ * scratch while this window is already drawn.
+ */
+async function engineVersion(timeoutMs = 60_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const health = await fetch(`${BRIDGE_HTTP}/health`).then((r) => r.json());
+      const v: string = health?.version ?? "";
+      if (v) return v;
+    } catch {
+      /* not up yet */
+    }
+    if (Date.now() >= deadline) return "";
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
 export function WhatsNew() {
   const [entries, setEntries] = useState<Entry[] | null>(null);
 
@@ -42,8 +62,12 @@ export function WhatsNew() {
     let cancelled = false;
     void (async () => {
       try {
-        const health = await fetch(`${BRIDGE_HTTP}/health`).then((r) => r.json());
-        const current: string = health?.version ?? "";
+        // Wait for the engine rather than asking once. Right after an update in place the app
+        // restarts and this window is ready before the engine has finished starting, so the single
+        // question fell into the void, the card gave up, and the release that had just installed
+        // itself was the one release nobody was told about. Nothing is recorded as seen until an
+        // answer actually arrives, so a card is postponed, never lost.
+        const current = await engineVersion();
         if (!current) return;
         const seen = localStorage.getItem(SEEN_KEY);
         if (!seen) {

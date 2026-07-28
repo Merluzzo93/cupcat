@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.28",
+    title: "Dead air you can see, and the card that says what changed",
+    points: [
+      "**CupCat can now find dead air by LOOKING, not only by listening.** Removing pauses has always meant hearing them, which leaves out every kind of footage that has no speech in it — a screen recording, a locked-off camera, a phone left running on a tripod, timelapse, b-roll. Ask to tighten one of those and it now finds the stretches where the picture stops changing and cuts them the same way. On a speaker, it only cuts where the picture is still **and** nobody is talking: a motionless picture is also what a person looks like sitting still mid-sentence. Measured on real handheld footage it correctly finds nothing to cut, and on the same footage with a frame held it finds exactly the held part.",
+      "**The \"What's new\" card no longer goes missing after an update.** It asked the engine which version was running exactly once, the moment the window appeared — and after an update in place the app restarts, so the window is ready before the engine is. The question fell into the void, the card gave up, and the one release nobody was told about was the one that had just installed itself. It now waits for the engine.",
+      "**A small fix no longer needs a release of its own.** CupCat reads the version from what a release contains rather than from its name, so a one-line fix can be published to everyone already running it without a new download page appearing. Releases are for the updates worth reading about.",
+    ],
+  },
+  {
     version: "1.7.27",
     title: "The update that proves the last one",
     points: [

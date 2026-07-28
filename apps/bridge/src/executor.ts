@@ -45,7 +45,8 @@ import { applyTemplate, listTemplates, saveTemplate } from "./templates";
 import { smoothSlowMo } from "./slowmo";
 import { separateStems } from "./separate";
 import { trackMotion } from "./track-local";
-import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, isHeavySource, probeMedia, sourceTimecode } from "./ffmpeg";
+import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, isHeavySource, probeMedia, sourceTimecode, videoStills } from "./ffmpeg";
+import { intersectRanges, shapeRanges } from "./ranges";
 import { generate, getModel, type GenerateOptions, type HfModel, listModels, uploadFile } from "./higgsfield";
 import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "./media";
 import { startRecording, stopRecording } from "./recorder";
@@ -1103,21 +1104,9 @@ async function detectSilence(doc: EditorDocument, args: Args): Promise<ToolOut> 
   const minKeep = Math.max(0, numOpt(args.minKeepSeconds) ?? 0.15);
   const fps = doc.timeline.fps;
   const assetDur = a.durationSeconds ?? Number.POSITIVE_INFINITY;
-  const raw = await audioSilences(a.url, noiseDb, minDur);
-  const merged: typeof raw = [];
-  for (const r of raw) {
-    const prev = merged[merged.length - 1];
-    if (prev && r.startSeconds - prev.endSeconds < minKeep) prev.endSeconds = r.endSeconds;
-    else merged.push({ ...r });
-  }
-  let ranges = merged
-    // Pad only INTERIOR boundaries: a silence starting at 0 (or ending at the file's end) has no
-    // speech beside it to protect — padding there just strands a tiny unremovable sliver at the edge.
-    .map((r) => ({
-      startSeconds: r.startSeconds <= 0.05 ? r.startSeconds : r.startSeconds + pad,
-      endSeconds: r.endSeconds >= assetDur - 0.05 ? r.endSeconds : r.endSeconds - pad,
-    }))
-    .filter((r) => r.endSeconds - r.startSeconds > 0.05);
+  // Merging, margins and the too-short drop are shared with detect_still — the same arithmetic
+  // decides what gets deleted in both, and it is unit-tested there rather than written twice here.
+  let ranges = shapeRanges(await audioSilences(a.url, noiseDb, minDur), { pad, minKeep, assetDur });
   // Speech guard: when a transcript is available, no cut range may swallow spoken WORDS — an
   // over-eager threshold (quiet speech misread as "silence") gets trimmed back to the actual gaps.
   let speechTrimmed = 0;
@@ -1160,6 +1149,64 @@ async function detectSilence(doc: EditorDocument, args: Args): Promise<ToolOut> 
       endFrame: Math.round(r.endSeconds * fps),
     })),
     note: "Ranges are already shrunk by padSeconds on each side (a margin so cuts don't clip word attacks) and verified against the transcript when available (no spoken words inside them). To cut this dead air, call ripple_delete_ranges with units:'seconds', the timeline clipId, and these startSeconds/endSeconds pairs as ranges — it maps source→timeline (honoring trim/speed) and ripples the clip's linked audio in sync. Do NOT convert to frames or add the clip's startFrame yourself; passing the source frames as units:'frames' will cut the wrong part of the timeline.",
+  });
+}
+
+/**
+ * Dead air found by LOOKING instead of listening.
+ *
+ * Silence detection can only tighten footage that has speech in it. A screen recording, a locked-off
+ * camera, a phone left running on a tripod, a timelapse — all of them have long stretches where
+ * nothing happens, and all of them are inaudible to it. This is the other half, and it returns the
+ * same shape so it feeds the same cut.
+ *
+ * `alsoSilent` intersects the two: cut only where the picture is still AND nobody is talking. On a
+ * talking-head recording that is the difference between removing the pauses and removing the person.
+ */
+async function detectStill(doc: EditorDocument, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.mediaRef);
+  if (!ref) return fail("mediaRef is required");
+  const a = doc.asset(ref);
+  if (!a?.url) return fail(`Media asset not found or not ready: ${ref}`);
+  if (a.type !== "video") return fail("detect_still needs a video asset — for audio use detect_silence.");
+
+  const toleranceDb = numOpt(args.toleranceDb) ?? -40;
+  const minStillSeconds = Math.max(0.1, numOpt(args.minStillSeconds) ?? 1);
+  const pad = Math.max(0, numOpt(args.padSeconds) ?? 0.1);
+  const minKeep = Math.max(0, numOpt(args.minKeepSeconds) ?? 0.15);
+  const fps = doc.timeline.fps;
+  const assetDur = a.durationSeconds ?? 0;
+
+  const raw = await videoStills(a.url, toleranceDb, minStillSeconds, assetDur || undefined);
+  let ranges = shapeRanges(raw, { pad, minKeep, assetDur: assetDur || Number.POSITIVE_INFINITY });
+
+  // Only where it is ALSO silent, when asked: a still picture over speech is a talking head that
+  // happens to sit very still, and cutting it removes the sentence.
+  let silenceTrimmed = 0;
+  if (args.alsoSilent === true) {
+    const quiet = shapeRanges(await audioSilences(a.url, numOpt(args.thresholdDb) ?? -30, 0.3), {
+      pad: 0,
+      minKeep: 0,
+      assetDur: assetDur || Number.POSITIVE_INFINITY,
+    });
+    const before = ranges.length;
+    ranges = intersectRanges(ranges, quiet).filter((r) => r.endSeconds - r.startSeconds >= Math.min(0.3, minStillSeconds));
+    silenceTrimmed = before - ranges.length;
+  }
+
+  return okJson({
+    fps,
+    toleranceDb,
+    padSeconds: pad,
+    count: ranges.length,
+    ...(args.alsoSilent === true ? { alsoSilent: true, droppedBecauseSomeoneWasTalking: silenceTrimmed } : {}),
+    stills: ranges.map((r) => ({
+      startSeconds: Math.round(r.startSeconds * 1000) / 1000,
+      endSeconds: Math.round(r.endSeconds * 1000) / 1000,
+      startFrame: Math.round(r.startSeconds * fps),
+      endFrame: Math.round(r.endSeconds * fps),
+    })),
+    note: "Ranges where the picture does not change — the visual equivalent of silence, for footage that has no speech to listen to. Already shrunk by padSeconds per side. To cut them, call ripple_delete_ranges with units:'seconds', the timeline clipId, and these startSeconds/endSeconds pairs — do NOT convert to frames yourself. On footage where somebody is TALKING, pass alsoSilent:true or you will cut a motionless speaker mid-sentence. toleranceDb −40 is the safe default; −35 catches grainier footage; at −30 a slow pan starts counting as still.",
   });
 }
 
@@ -3111,6 +3158,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         return await inspectColor(ctx.doc, args);
       case "detect_silence":
         return await detectSilence(ctx.doc, args);
+      case "detect_still":
+        return await detectStill(ctx.doc, args);
       case "analyze_footage":
         return await analyzeFootageTool(ctx.doc, args);
       case "capture_frame":

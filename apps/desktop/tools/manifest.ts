@@ -9,7 +9,12 @@
 // everything else keeps pointing at the release it last changed in, so someone three versions behind
 // still gets a complete update without any release having to carry 1.5 GB of unchanged tools.
 //
-//   bun run apps/desktop/tools/manifest.ts <version>
+//   bun run apps/desktop/tools/manifest.ts <version> [--tag <releaseTag>]
+//
+// `since` names the release TAG carrying a file's content, which is usually this version's own tag.
+// Pass --tag to publish a small fix into a release that already exists: the version moves, the tag
+// does not, and the release page — with its installer — stays where it is. That is what makes a fix
+// shippable without a release of its own.
 //
 // The first release to ship one has no predecessor manifest to compare against; generate the
 // previous version's from a real installation with `--from-install <dir> --from-version <v>`.
@@ -117,6 +122,10 @@ if (!version || version.startsWith("-")) {
   process.exit(1);
 }
 
+// Where the changed files will be uploaded. Defaults to this version's own tag; point it at an
+// existing release to ship a fix without creating one.
+const hostTag = (arg("--tag") ?? `v${version}`).replace(/^v?/, "v");
+
 const prev = await previousManifest();
 const prevByPath = new Map((prev?.files ?? []).map((f) => [f.path, f]));
 if (prev) console.log(`comparing against ${prev.version} (${prev.files.length} files)`);
@@ -137,7 +146,7 @@ for (const [rel, abs] of [...packagedFiles()].sort((a, b) => a[0].localeCompare(
   const hash = await sha256(abs);
   const before = prevByPath.get(rel);
   const unchanged = before && before.sha256 === hash;
-  const entry: ManifestFile = { path: rel, size, sha256: hash, since: unchanged ? before.since : version, asset };
+  const entry: ManifestFile = { path: rel, size, sha256: hash, since: unchanged ? before.since : hostTag, asset };
   files.push(entry);
   if (!unchanged) {
     copyFileSync(abs, join(deltaDir, asset));
@@ -157,3 +166,10 @@ console.log(`\n${files.length} files, ${mb(total)} installed`);
 console.log(`${changed.length} changed, ${mb(delta)} to publish:`);
 for (const f of changed) console.log(`  ${f.path.padEnd(40)} ${mb(f.size).padStart(10)}  → ${f.asset}`);
 console.log(`\nupload from ${deltaDir}`);
+console.log(
+  changed.length === 0
+    ? "nothing changed — nothing to upload"
+    : hostTag === `v${version}`
+      ? `into a new release ${hostTag}`
+      : `into the EXISTING release ${hostTag} — no new release, the page and its installer stay put`,
+);

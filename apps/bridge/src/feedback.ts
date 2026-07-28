@@ -4,8 +4,8 @@
 // nothing is uploaded anywhere — the user sends the resulting file to the developer manually.
 
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { FFMPEG_BIN, projectRoot } from "./config";
+import { basename, join } from "node:path";
+import { CUPCAT_VERSION, FFMPEG_BIN, projectRoot } from "./config";
 import { run } from "./proc";
 
 // ── console ring buffer ──────────────────────────────────────────────────────────────────
@@ -75,6 +75,42 @@ async function captureScreenshot(pngPath: string): Promise<string | null> {
     return res.stdout.trim() || null;
   } catch {
     return null;
+  }
+}
+
+/** Where a report is sent when the user asks for it to be. Overridable so the whole path can be
+ * exercised against a local server before it is pointed at the real one. */
+export const REPORT_ENDPOINT = process.env.CUPCAT_REPORT_URL ?? "https://cupcat.meetaly.agency/report.php";
+
+/**
+ * Send a finished bundle to the developer.
+ *
+ * Only ever called because someone pressed the button: this is their screen, their project and their
+ * logs leaving their machine, and it does not happen quietly in the background. Returns a plain
+ * reason on failure so the dialog can fall back to "here is the file, send it yourself" rather than
+ * dead-ending.
+ */
+export async function sendFeedbackBundle(
+  zipPath: string,
+  meta: { type: string; description: string; version: string },
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const file = Bun.file(zipPath);
+    if (!(await file.exists())) return { ok: false, error: "the report file is missing" };
+    const form = new FormData();
+    form.append("bundle", file, basename(zipPath));
+    form.append("type", meta.type);
+    form.append("description", meta.description);
+    form.append("version", meta.version);
+    form.append("platform", `${process.platform} ${process.arch}`);
+    const res = await fetch(REPORT_ENDPOINT, { method: "POST", body: form, signal: AbortSignal.timeout(120_000) });
+    const j = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (res.ok && j?.ok) return { ok: true };
+    return { ok: false, error: j?.error ?? `the server answered ${res.status}` };
+  } catch (e) {
+    // Offline, blocked, or the site is down — all the same to the user, and all recoverable by
+    // sending the file by hand.
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 

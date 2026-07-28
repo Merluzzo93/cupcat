@@ -558,6 +558,23 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "detect_still",
+    description:
+      "Find where the PICTURE stops moving — dead air you can SEE. detect_silence only works on footage with speech; this is for footage without it: screen recordings, a locked-off camera, a phone left running on a tripod, timelapse, b-roll. Returns ranges in source seconds AND project frames, the same shape as detect_silence, so feed them straight to ripple_delete_ranges (units:'seconds') to cut them. On footage where somebody is TALKING pass alsoSilent:true — a motionless picture is also what a person looks like sitting still mid-sentence, and cutting on stillness alone removes the sentence. toleranceDb: how different two frames may be and still count as the same picture; −40 (default) is safe and catches held frames and static shots with mild grain, −35 catches grainier footage, and at −30 a slow pan starts registering as still.",
+    inputSchema: obj(
+      {
+        mediaRef: { type: "string", description: "Video asset id from get_media." },
+        toleranceDb: { type: "number", description: "Frame-difference tolerance in dB (default −40; higher = looser = more counted as still)." },
+        minStillSeconds: { type: "number", description: "Shortest stretch to report (default 1 s)." },
+        padSeconds: { type: "number", description: "Margin kept on each side of every range (default 0.1 s; 0 cuts flush)." },
+        minKeepSeconds: { type: "number", description: "Movement shorter than this between two still stretches is swallowed into the cut instead of surviving as a flash-frame (default 0.15 s)." },
+        alsoSilent: { type: "boolean", description: "Only report stretches that are ALSO silent. Use on anything with a speaker in it." },
+        thresholdDb: { type: "number", description: "Silence threshold used when alsoSilent is set (default −30)." },
+      },
+      ["mediaRef"],
+    ),
+  },
+  {
     name: "capture_frame",
     description:
       "Render the composited timeline frame at atFrame (default 0) and add it to the library as a new image asset — a freeze-frame / still you can reuse on the timeline or as a generation reference.",
