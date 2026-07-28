@@ -226,7 +226,8 @@ export function startServer(ctx: BridgeContext) {
   // own — it then talks to the first instance's engine, showing that instance's project, or
   // nothing at all. Say what happened, in words, and stop cleanly.
   try {
-    return serve(ctx, clients, stateMsg, broadcast, broadcastRaw, broadcastStatus);
+    running = serve(ctx, clients, stateMsg, broadcast, broadcastRaw, broadcastStatus);
+    return running;
   } catch (e) {
     // The code is on the error object; the MESSAGE is only "Failed to start server. Is port
     // N in use?" — matching the message alone missed it, and the raw stack trace came back.
@@ -245,6 +246,27 @@ export function startServer(ctx: BridgeContext) {
 
 /** An install in place is under way. Guards against a second click starting a second download. */
 let updating = false;
+
+/** The running HTTP server, so the port can be given up before this process hands off to another. */
+let running: ReturnType<typeof Bun.serve> | null = null;
+
+/**
+ * Close the listening socket and drop every open connection.
+ *
+ * Needed before starting the update helper, and the reason is a Windows detail with teeth: a child
+ * process inherits its parent's socket handles. The helper is our child and it starts CupCat, so the
+ * port stayed bound to a socket belonging to an engine that had already exited — held open by the
+ * app it had just relaunched. The new engine then found its own port taken and could never start,
+ * and the window reported the engine lost. Nothing can be inherited that is already closed.
+ */
+export function releasePort(): void {
+  try {
+    running?.stop(true);
+  } catch {
+    /* going away regardless */
+  }
+  running = null;
+}
 
 function serve(
   ctx: BridgeContext,
@@ -287,7 +309,7 @@ function serve(
         if (!plan) return Response.json({ ok: false, error: "no update is ready to install" }, { headers: cors });
         if (updating) return Response.json({ ok: false, error: "already installing" }, { headers: cors });
         updating = true;
-        void applyUpdate(plan, (p) => broadcastRaw({ type: "update-progress", ...p })).finally(() => {
+        void applyUpdate(plan, (p) => broadcastRaw({ type: "update-progress", ...p }), releasePort).finally(() => {
           updating = false;
         });
         return Response.json({ ok: true, files: plan.files.length, bytes: plan.bytes }, { headers: cors });

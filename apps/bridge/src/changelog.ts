@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.26",
+    title: "After an update, CupCat comes back working",
+    points: [
+      "**An update no longer comes back to \"lost contact with the engine\".** The update itself finished correctly — the right files, checked, in the right place — but the new engine could not start, because its port was still held by the engine that had just exited. On Windows a child process inherits its parent's open sockets, and the engine has two descendants: the helper that performs the swap, and the CupCat that helper starts. So the port stayed bound on behalf of a process that no longer existed, and only closing CupCat by hand cleared it. The engine now closes its port before handing over — nothing left open is nothing to inherit.",
+    ],
+  },
+  {
     version: "1.7.25",
     title: "You can read what an update contains before installing it",
     points: [

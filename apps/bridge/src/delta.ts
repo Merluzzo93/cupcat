@@ -405,8 +405,14 @@ function launchHelper(root: string, plan: UpdatePlan): void {
 /**
  * Download the update, then quit so it can be put in place. Resolves only if something went wrong —
  * on success the process exits.
+ *
+ * `releasePort` closes this process's listening socket before the helper is started, and it is not
+ * optional: on Windows a child inherits its parent's socket handles, so the helper — and then the
+ * CupCat it relaunches — kept the port bound on behalf of an engine that had already exited. The new
+ * engine found its port taken, could never start, and the freshly updated app opened to "lost
+ * contact with the engine".
  */
-export async function applyUpdate(plan: UpdatePlan, onProgress: (p: UpdateProgress) => void): Promise<void> {
+export async function applyUpdate(plan: UpdatePlan, onProgress: (p: UpdateProgress) => void, releasePort?: () => void): Promise<void> {
   const root = installRoot();
   if (!root) {
     onProgress({ phase: "error", bytesDone: 0, bytesTotal: 0, filesDone: 0, filesTotal: 0, error: "not a packaged install" });
@@ -416,10 +422,14 @@ export async function applyUpdate(plan: UpdatePlan, onProgress: (p: UpdateProgre
     await stage(root, plan, onProgress);
     writeFileSync(join(updateDir(root), "pending.json"), JSON.stringify({ version: plan.version, files: plan.files }, null, 2));
     onProgress({ phase: "staged", bytesDone: plan.bytes, bytesTotal: plan.bytes, filesDone: plan.files.length, filesTotal: plan.files.length });
-    launchHelper(root, plan);
     onProgress({ phase: "restarting", bytesDone: plan.bytes, bytesTotal: plan.bytes, filesDone: plan.files.length, filesTotal: plan.files.length });
-    // Give the message time down the socket before the socket goes away with us.
-    setTimeout(() => process.exit(EXIT_FOR_UPDATE), 400);
+    // Say it first, then let go of the port, and only then start the helper — anything still open
+    // when it starts is inherited by it, and by the CupCat it goes on to launch.
+    setTimeout(() => {
+      releasePort?.();
+      launchHelper(root, plan);
+      process.exit(EXIT_FOR_UPDATE);
+    }, 400);
   } catch (e) {
     try {
       rmSync(join(updateDir(root), "staged"), { recursive: true, force: true });
