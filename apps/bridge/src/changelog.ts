@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.23",
+    title: "TEST UPDATE — this card is the proof that updating in place worked",
+    points: [
+      "**If you are reading this, CupCat updated itself.** It downloaded about 112 MB instead of a 1 GB installer, put the new files in place, and restarted — on its own. This entry exists only to be visible; it is removed in the next version.",
+      "**CupCat now keeps checking for updates while it is open.** Checking only at startup meant an editor left open all day never heard about a release until it was next launched.",
+    ],
+  },
+  {
     version: "1.7.22",
     title: "Updates install themselves, and download about a tenth of what they used to",
     points: [
