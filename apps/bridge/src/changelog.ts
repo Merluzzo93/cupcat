@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.27",
+    title: "The update that proves the last one",
+    points: [
+      "**This is the first update where 1.7.26's port fix can actually do its job** — and if CupCat came back working without being closed and reopened by hand, it did. The fix belongs to the engine that *hands over*, not the one that arrives, so the update that carried it could not benefit from it: 1.7.25 handed over to 1.7.26 using 1.7.25's code. Worth knowing for any future fix to the handoff — it always takes effect one update later than it ships.",
+      "**While an update downloads, it now says what it is fetching** — \"the editor engine\", \"the app\" — instead of a filename that means something to us and nothing to you.",
+    ],
+  },
+  {
     version: "1.7.26",
     title: "After an update, CupCat comes back working",
     points: [

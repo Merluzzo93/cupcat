@@ -111,6 +111,8 @@ const EN = {
   "update.staged": "Downloaded. Putting it in place…",
   "update.restarting": "CupCat is restarting to finish the update.",
   "update.failed": "Couldn't install it in place: {error}. The full installer still works.",
+  "update.partEngine": "the editor engine",
+  "update.partApp": "the app",
   "update.showNotes": "What changes",
   "update.hideNotes": "Hide",
 
@@ -597,6 +599,8 @@ const IT: Partial<Record<Key, string>> = {
   "update.staged": "Scaricato. Lo metto al suo posto…",
   "update.restarting": "CupCat si riavvia per completare l'aggiornamento.",
   "update.failed": "Non sono riuscito a installarlo qui: {error}. L'installer completo funziona comunque.",
+  "update.partEngine": "il motore dell'editor",
+  "update.partApp": "l'app",
   "update.showNotes": "Cosa cambia",
   "update.hideNotes": "Nascondi",
 

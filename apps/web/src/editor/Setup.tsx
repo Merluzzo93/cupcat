@@ -62,6 +62,15 @@ function mb(bytes: number): string {
   return `${(bytes / 1e6).toFixed(1)} MB`;
 }
 
+/** What a file being downloaded is, in the user's terms. "cupcat-bridge.exe" is our word for it,
+ * not theirs, and it is the one thing on screen while they wait. */
+function fileLabel(path: string): string {
+  const l = path.toLowerCase();
+  if (l === "cupcat-bridge.exe") return t("update.partEngine");
+  if (l === "cupcat.exe") return t("update.partApp");
+  return path.split("/").pop() ?? path;
+}
+
 // Shown when the bridge finds a newer GitHub release.
 //
 // Two ways forward. When the release can be installed in place — the normal case for anyone already
@@ -92,7 +101,7 @@ export function UpdateBanner() {
         <span className="font-semibold">{t("update.title")}</span>
         <span className="text-teal-200/90">
           {p.phase === "download"
-            ? t("update.installing", { file: p.file ?? "", done: mb(p.bytesDone), total: mb(p.bytesTotal) })
+            ? t("update.installing", { file: p.file ? fileLabel(p.file) : "", done: mb(p.bytesDone), total: mb(p.bytesTotal) })
             : p.phase === "staged"
               ? t("update.staged")
               : t("update.restarting")}
