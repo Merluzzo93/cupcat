@@ -35,6 +35,8 @@ bun run build:web && bun run build:bridge
 cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
 cd apps/desktop && npx @tauri-apps/cli@latest build      # needs cargo AND node on PATH
 bun run apps/desktop/tools/manifest.ts <version>          # AFTER the build: reads the installer itself
+7z x -y -o<dir> target/release/bundle/nsis/CupCat_<v>_x64-setup.exe && rm -rf <dir>/\$PLUGINSDIR
+bun run apps/desktop/tools/check-manifest.ts apps/desktop/manifests/<v>.json <dir>   # must be 0/0/0
 ```
 
 The manifest must be generated **after** `tauri build` and takes `cupcat.exe` **out of the installer**
