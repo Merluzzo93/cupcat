@@ -8,9 +8,8 @@
 // It reads the source rather than importing the module, because the dictionaries are not exported —
 // and reading the file is also what proves the two objects really are side by side in it.
 
-import { describe, expect, test } from "bun:test";
-
-const SRC = "apps/web/src/editor/i18n.ts";
+import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
 
 /** The keys declared in one dictionary literal. The two end differently — EN closes with
  * `} as const;` so its keys can be a type — so the end is any closing brace at column 0. */
@@ -22,7 +21,9 @@ function keysOf(src: string, decl: string): string[] {
   return [...src.slice(start, start + decl.length + end).matchAll(/^ {2}"([^"]+)":/gm)].map((m) => m[1]!);
 }
 
-const src = await Bun.file(SRC).text();
+// Resolved from the repo root: vitest runs with apps/web as its working directory, bun test with the
+// root as its own, so neither a bare relative path nor an absolute one works for both runners.
+const src = readFileSync(new URL("./i18n.ts", import.meta.url), "utf8");
 const en = keysOf(src, "const EN = {");
 const it = keysOf(src, "const IT: Partial<Record<Key, string>> = {");
 

@@ -47,13 +47,15 @@ import { separateStems } from "./separate";
 import { trackMotion } from "./track-local";
 import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, isHeavySource, probeMedia, sourceTimecode, videoStills } from "./ffmpeg";
 import { intersectRanges, shapeRanges } from "./ranges";
+import { suggestThumbnails } from "./thumbnails";
 import { generate, getModel, type GenerateOptions, type HfModel, listModels, uploadFile } from "./higgsfield";
 import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "./media";
 import { startRecording, stopRecording } from "./recorder";
 import { multicamCut } from "./multicam";
 import { offsetLabel, pickReference, planAnglePlacements } from "./synccam";
 import { findLag, syncProbePlan } from "./align";
-import { assignPieces, sourceToTimeline, speakerOrder, splitFramesForTurns } from "./speakerplan";
+import { assignPieces, sourceToTimeline, speakerOrder, splitFramesForTurns, timelineToSource } from "./speakerplan";
+import { planCameras } from "./camplan";
 import { framingFor, isConfident, mouthRegion, rankSpeakers, regionMotion } from "./emphasis";
 import { OPENERS, planOpener, rippleRight } from "./openers";
 import { loadBrandKit, saveBrandKit } from "./brandkit";
@@ -1448,6 +1450,62 @@ async function captureFrame(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   return ok(`Captured frame ${frame} as ${asset.id} (added to the library).`);
 }
 
+/**
+ * Cover candidates, chosen by measuring the whole video instead of scrubbing it.
+ *
+ * The stills land in the library as images so they can be looked at, dropped on the timeline, or
+ * handed to whatever publishes the video. Scores are comparable within one run only — sharpness is
+ * judged against the rest of the same footage, which is the only way it means anything.
+ */
+async function suggestThumbnailsTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.mediaRef) ?? strOpt(args.media);
+  const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
+  if (!a) return fail(`Asset not found: ${ref ?? "(mediaRef is required — pass a library video's id or name)"}`);
+  if (a.type !== "video" || !a.url) return fail("suggest_thumbnails needs a VIDEO asset from the library.");
+  try {
+    const res = await suggestThumbnails(a.url, {
+      count: numOpt(args.count),
+      startSeconds: numOpt(args.startSeconds),
+      endSeconds: numOpt(args.endSeconds),
+      faces: args.faces !== false,
+      onProgress: (text) => emitProgress("suggest_thumbnails", text),
+    });
+    for (let i = 0; i < res.suggestions.length; i++) {
+      const s = res.suggestions[i]!;
+      const probe = await probeMedia(s.path);
+      ctx.doc.addAsset({
+        id: newId("asset"),
+        type: "image",
+        name: `${a.name} — cover ${i + 1} (${s.atSeconds}s)`,
+        url: s.path,
+        durationSeconds: 0.04,
+        sourceWidth: probe.width,
+        sourceHeight: probe.height,
+        hasAudio: false,
+        generationStatus: { kind: "none" },
+      } as MediaAsset);
+    }
+    ctx.doc.notifyChanged();
+    return okJson({
+      count: res.suggestions.length,
+      sampledFrames: res.sampled,
+      everySeconds: res.everySeconds,
+      measuredOn: res.measuredOn,
+      faceDetector: res.faceDetector,
+      suggestions: res.suggestions,
+      note:
+        `Added ${res.suggestions.length} full-resolution still(s) to the library, best first by score. ` +
+        `Scores are relative to THIS video — sharpness only means something next to the same footage's other frames, so do not compare them across videos. ` +
+        (res.faceDetector
+          ? "Faces were checked, and a frame with a readable face is favoured. "
+          : "The face detector was unavailable, so the ranking is on picture quality alone — say so if the user expected a shot of somebody. ") +
+        "Show the user the files at these paths and let them choose; the times are SOURCE seconds.",
+    });
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function addMatte(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const color = strOpt(args.color) ?? "#000000";
   if (!/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(color)) return fail("color must be '#RRGGBB' or '#RRGGBBAA'.");
@@ -1919,6 +1977,168 @@ async function splitAudioBySpeakerTool(ctx: BridgeContext, args: Args): Promise<
     `Separated "${asset.name}" into ${order.length} tracks — ${summary}. Silence stayed on the original track. ` +
       `The picture was cut at the same points so it stays locked to its sound.`,
   );
+}
+
+/**
+ * Camera switching driven by who is talking.
+ *
+ * multicam_cut already does the surgery; what it wants is a list of switch points, and writing that
+ * list by hand for a long conversation is the actual work. This reads the speaker turns, decides the
+ * shots (camplan.ts holds those rules and their tests) and hands the result over.
+ *
+ * The turns are SOURCE seconds of whichever recording was diarized, and the switches have to land on
+ * the TIMELINE — so everything goes through that clip's own window, which knows about its trim and
+ * its speed. Doing that conversion by eye is how a plan ends up a few seconds out for its whole
+ * length, with every cut landing just after the word it was meant to precede.
+ */
+async function autoMulticamTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const doc = ctx.doc;
+  const ids = Array.isArray(args.angleClipIds) ? (args.angleClipIds as unknown[]).filter((x): x is string => typeof x === "string") : [];
+  if (ids.length < 2) return fail("auto_multicam needs angleClipIds with 2+ synced angle clips — one per camera (see sync_audio).");
+  if (new Set(ids).size !== ids.length) return fail("angleClipIds contains duplicates — pass each angle once.");
+
+  const angles = ids.map((id) => {
+    const loc = doc.findClip(id);
+    if (!loc) throw new Error(`Clip not found: ${id}`);
+    const clip = doc.timeline.tracks[loc.trackIndex]!.clips[loc.clipIndex]!;
+    if (clip.mediaType !== "video") throw new Error(`${id} is a ${clip.mediaType} clip — multicam angles must be video clips.`);
+    return { id, clip };
+  });
+
+  const winStart = Math.max(...angles.map((a) => a.clip.startFrame));
+  const winEnd = Math.min(...angles.map((a) => clipEndFrame(a.clip)));
+  if (winEnd <= winStart) {
+    return fail("The angle clips do not overlap in time, so there is no window to switch inside. Align them first with sync_audio.");
+  }
+
+  // Which recording's speaker turns to follow. Naming a clip is the reliable way; without one, the
+  // first angle that has been diarized wins, because that is nearly always the camera with the good
+  // microphone and the one whose audio multicam_cut is about to keep.
+  const named = strOpt(args.turnsFrom);
+  const candidates = named ? angles.filter((a) => a.id === named || a.clip.mediaRef === named) : angles;
+  if (named && candidates.length === 0) return fail(`turnsFrom "${named}" is not one of the angle clips (pass its clipId or its mediaRef).`);
+  let source: { clip: (typeof angles)[number]["clip"]; turns: SpeakerTurn[]; assetName: string } | null = null;
+  for (const a of candidates) {
+    const asset = doc.asset(a.clip.mediaRef);
+    if (!asset?.url) continue;
+    const d = await loadDiarization(asset.url);
+    if (d && d.turns.length > 0) {
+      source = { clip: a.clip, turns: d.turns, assetName: asset.name };
+      break;
+    }
+  }
+  if (!source) {
+    return fail(
+      "None of these angles has speaker turns yet. Run identify_speakers on the angle with the best audio first — auto_multicam switches on who is talking, so without turns there is nothing to switch on.",
+    );
+  }
+
+  const fps = doc.timeline.fps;
+  const win = {
+    startFrame: source.clip.startFrame,
+    durationFrames: source.clip.durationFrames,
+    trimStartFrame: source.clip.trimStartFrame,
+    speed: source.clip.speed,
+    fps,
+  };
+
+  // Who each camera shows. Given explicitly it is unambiguous; guessed, it follows the order people
+  // first speak in, which matches how angles are usually laid out — and is reported back, because a
+  // wrong guess here is the one mistake that makes the whole montage point at the wrong person.
+  const order = speakerOrder(source.turns);
+  const rawNames = Array.isArray(args.angleSpeakers) ? (args.angleSpeakers as unknown[]) : null;
+  const speakerAngles: Record<string, number> = {};
+  let wideAngle = numOpt(args.wideAngle);
+  let mapping: string;
+  if (rawNames) {
+    if (rawNames.length !== ids.length) return fail(`angleSpeakers has ${rawNames.length} entries but there are ${ids.length} angles — one per angle, in the same order.`);
+    rawNames.forEach((n, i) => {
+      const name = typeof n === "string" ? n.trim() : "";
+      if (name === "" || /^(wide|master|both|all)$/i.test(name)) {
+        if (wideAngle === undefined) wideAngle = i;
+        return;
+      }
+      speakerAngles[name] = i;
+    });
+    const unknown = Object.keys(speakerAngles).filter((s) => !order.includes(s));
+    if (unknown.length > 0) {
+      return fail(`angleSpeakers names ${unknown.map((u) => `"${u}"`).join(", ")}, which nobody in "${source.assetName}" is called. The speakers found there are: ${order.join(", ")}.`);
+    }
+    mapping = "as given";
+  } else {
+    order.forEach((s, i) => {
+      if (i < ids.length) speakerAngles[s] = i;
+    });
+    mapping = "guessed from the order people first speak";
+  }
+  if (wideAngle !== undefined && (wideAngle < 0 || wideAngle >= ids.length)) {
+    return fail(`wideAngle ${wideAngle} is out of range — 0–${ids.length - 1}.`);
+  }
+
+  const plan = planCameras(
+    source.turns.map((t) => ({ speaker: t.speaker, startSeconds: t.startSeconds, endSeconds: t.endSeconds })),
+    {
+      startSeconds: timelineToSource(winStart, win),
+      endSeconds: timelineToSource(winEnd, win),
+      speakerAngles,
+      wideAngle,
+      minShotSeconds: numOpt(args.minShotSeconds),
+      minTurnSeconds: numOpt(args.minTurnSeconds),
+      minOverlapSeconds: numOpt(args.minOverlapSeconds),
+      minPauseSeconds: numOpt(args.minPauseSeconds),
+      maxShotSeconds: numOpt(args.maxShotSeconds),
+      cutawaySeconds: numOpt(args.cutawaySeconds),
+    },
+  );
+
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const described = plan.segments.map((s) => ({
+    angle: s.angle,
+    clipId: ids[s.angle],
+    startSeconds: r2(s.startSeconds),
+    endSeconds: r2(s.endSeconds),
+    startFrame: Math.round(sourceToTimeline(s.startSeconds, win)),
+    why: s.why,
+    ...(s.speaker ? { speaker: s.speaker } : {}),
+  }));
+  const shared = {
+    switches: plan.switches,
+    mapping: `${mapping}: ${Object.entries(speakerAngles).map(([s, i]) => `${s} → angle ${i}`).join(", ")}${wideAngle === undefined ? ", no wide angle" : `, wide = angle ${wideAngle}`}`,
+    secondsPerAngle: plan.perAngle.map(r2),
+    ...(plan.unmappedSpeakers.length > 0 ? { speakersNoCameraShows: plan.unmappedSpeakers } : {}),
+    segments: described,
+  };
+
+  if (args.preview === true) {
+    return okJson({
+      ...shared,
+      previewOnly: true,
+      note: "Nothing was changed. Show the user this plan — especially the mapping, since a wrong speaker-to-camera guess points the whole montage at the wrong person — then call auto_multicam again without preview.",
+    });
+  }
+
+  // Deduplicated and window-clamped: two switches rounding onto one frame would ask multicam_cut to
+  // split the same frame twice, and the second split fails.
+  const cuts = new Map<number, number>();
+  for (const s of plan.segments) {
+    const f = Math.round(sourceToTimeline(s.startSeconds, win));
+    if (f >= winStart && f < winEnd) cuts.set(f, s.angle);
+  }
+  if (cuts.size === 0) return fail("The plan produced no switch inside the angles' common window — nothing to cut.");
+
+  const audioAngle = numOpt(args.audioAngle);
+  const result = multicamCut(doc, {
+    angleClipIds: ids,
+    cuts: [...cuts.entries()].sort((a, b) => a[0] - b[0]),
+    audioAngle,
+  });
+  return okJson({
+    ...shared,
+    applied: result,
+    note:
+      `Cut on speech from "${source.assetName}". ${plan.switches} switch(es) across ${described.length} shot(s). ` +
+      "If the montage points at the wrong person, the speaker-to-angle mapping is what to fix: pass angleSpeakers (one name per angle, in the same order as angleClipIds) and run it again after undo.",
+  });
 }
 
 /** Human correction for identify_speakers: REPLACE the cached speaker turns for an asset so
@@ -3164,6 +3384,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         return await analyzeFootageTool(ctx.doc, args);
       case "capture_frame":
         return await captureFrame(ctx, args);
+      case "suggest_thumbnails":
+        return await suggestThumbnailsTool(ctx, args);
       case "match_loudness":
         return await enhanceTool(ctx, args, "loudness matched", (src, prog) =>
           matchLoudness(src, { target: strOpt(args.target) as LoudnessTarget | undefined, onProgress: prog }),
@@ -3318,6 +3540,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
             endFrame: numOpt(args.endFrame),
           }),
         );
+      case "auto_multicam":
+        return await autoMulticamTool(ctx, args);
       case "multicam_cut":
         return ok(
           multicamCut(ctx.doc, {

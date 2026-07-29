@@ -581,6 +581,21 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: obj({ atFrame: { type: "integer", description: "Project frame to capture (default 0)." } }),
   },
   {
+    name: "suggest_thumbnails",
+    description:
+      "COVER / THUMBNAIL: sweep a library VIDEO and hand back the best few frames to use as its cover, added to the library as full-resolution stills. Measures every sampled frame for focus (variance of the Laplacian — this is what rejects motion blur), exposure and contrast, skips frames sitting on a shot change, then checks the shortlist for faces and favours a frame with a readable one. THE tool for 'pick a thumbnail / cover / poster frame / best frame'. Local, no credits. Picks are forced apart in time so the suggestions are different moments rather than one moment five times.",
+    inputSchema: obj(
+      {
+        mediaRef: { type: "string", description: "Library video asset id or name." },
+        count: { type: "integer", description: "How many candidates to return, 1–12 (default 5)." },
+        startSeconds: { type: "number", description: "Only consider from this point in the source (default 0)." },
+        endSeconds: { type: "number", description: "Only consider up to this point in the source (default the end)." },
+        faces: { type: "boolean", description: "Check the shortlist for faces (default true). Set false to judge on picture quality alone." },
+      },
+      ["mediaRef"],
+    ),
+  },
+  {
     name: "auto_rough_cut",
     description:
       "ROUGH CUT (first-assembly): turn a FOLDER of raw footage (or a list of clips) into an editable draft on the timeline, locally. Analyzes each video with ffmpeg, trims dead black heads/tails, lays the clips end-to-end on V1 (linked audio follows), and drops the first audio asset in scope as a music bed on its own track. THE tool for 'make a first cut / rough cut from this folder / assemble these clips'. Fast and offline — no export, no cloud. Returns the assembled order so you can then refine (reorder, tighten via the transcript, add titles/transitions) before the user exports.",
@@ -1092,6 +1107,33 @@ export const TOOL_DEFS: ToolDef[] = [
         endFrame: { type: "integer", description: "Timeline frame where the lens disappears (default clip end)." },
       },
       ["clipId"],
+    ),
+  },
+  {
+    name: "auto_multicam",
+    description:
+      "MULTICAM, AUTOMATIC: cut a synced multi-angle stack to whoever is TALKING, without writing switch points by hand. Reads the speaker turns from identify_speakers, decides the shots (no shot under ~1.5s, a two-word interjection does not move the camera, crosstalk and long silences go to the wide angle if there is one), and performs the switch as one undoable action. THE tool for 'edit this podcast/interview/panel from the multiple cameras'. Requires identify_speakers to have been run on the angle with the best audio. Pass preview:true first to show the plan without touching the timeline — the speaker-to-angle mapping is the one thing worth confirming.",
+    inputSchema: obj(
+      {
+        angleClipIds: { type: "array", items: { type: "string" }, description: "One video clipId per camera angle, aligned in time (see sync_audio). 2+." },
+        angleSpeakers: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Who each angle shows, in the SAME order as angleClipIds — a speaker label from identify_speakers, or \"wide\"/\"\" for a master shot of everyone. Omit and the speakers are matched to angles in the order they first talk, which is reported back so it can be corrected.",
+        },
+        wideAngle: { type: "integer", description: "Index of the master/wide angle. Implied by angleSpeakers; set here to override." },
+        audioAngle: { type: "integer", description: "Index of the angle whose sound plays throughout (default 0); -1 leaves all audio alone." },
+        turnsFrom: { type: "string", description: "clipId or mediaRef of the angle whose speaker turns to follow (default: the first angle that has any)." },
+        minShotSeconds: { type: "number", description: "Shortest shot allowed (default 1.5). Raise for a calmer edit." },
+        minTurnSeconds: { type: "number", description: "A turn shorter than this does not move the camera (default 0.6)." },
+        minOverlapSeconds: { type: "number", description: "Simultaneous speech shorter than this is not treated as crosstalk (default 0.8)." },
+        minPauseSeconds: { type: "number", description: "A gap shorter than this is a breath and holds the shot (default 2.5)." },
+        maxShotSeconds: { type: "number", description: "Cut away to the wide after this long on one angle. Off unless set — a monologue is otherwise one shot." },
+        cutawaySeconds: { type: "number", description: "How long that cutaway lasts (default 2.5)." },
+        preview: { type: "boolean", description: "Return the plan and change nothing." },
+      },
+      ["angleClipIds"],
     ),
   },
   {

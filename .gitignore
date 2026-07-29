@@ -43,3 +43,6 @@ STRATEGIA-2026.md
 
 # Leftover temp files from an interrupted `bun build --compile`
 *.bun-build
+
+# Scratch scripts used to drive the engine against real footage while verifying a feature.
+**/verify-scratch/
