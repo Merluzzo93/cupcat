@@ -33,7 +33,7 @@ import { beginJob, cancelJob, currentJob_, endJob, jobCancelled, killTagged, run
 import { emitProgress } from "./progress";
 import { type ExportFormat, type ExportQuality, ensureCompoundBake, exportTimeline, renderFrameAndScopes, renderFrameToFile, renderFrames, renderTimelineView, saveRangeToFile } from "./export";
 import { autoClips } from "./clips";
-import { detectFacesAt, iou, renderFaceBlur } from "./faceblur";
+import { renderFaceBlur } from "./faceblur";
 import { deflickerVideo, denoiseVideo, duckMusic, enhanceAudio, stabilizeVideo } from "./enhance";
 import { chapterTimestamp, detectChapters } from "./chapters";
 import { matchLoudness, repairAudio, type LoudnessTarget } from "./enhance";
@@ -56,7 +56,9 @@ import { offsetLabel, pickReference, planAnglePlacements } from "./synccam";
 import { findLag, syncProbePlan } from "./align";
 import { assignPieces, sourceToTimeline, speakerOrder, splitFramesForTurns, timelineToSource } from "./speakerplan";
 import { planCameras } from "./camplan";
-import { framingFor, isConfident, mouthRegion, rankSpeakers, regionMotion } from "./emphasis";
+import { autoPan, describePositions } from "./autopan";
+import { framingFor } from "./emphasis";
+import { whoIsSpeaking } from "./speaking";
 import { OPENERS, planOpener, rippleRight } from "./openers";
 import { loadBrandKit, saveBrandKit } from "./brandkit";
 import { magnify, punchIn } from "./zoom";
@@ -1742,38 +1744,6 @@ async function brandKitTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   });
 }
 
-/** Grayscale frames of a span, small and evenly spaced, for measuring movement. One decode. */
-async function grayFrames(
-  srcPath: string,
-  fromSeconds: number,
-  durSeconds: number,
-  fps: number,
-  width: number,
-): Promise<{ frames: Uint8Array[]; width: number; height: number } | null> {
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const raw = join(exportsDir, `_mouth_${stamp}.gray`);
-  try {
-    const height = Math.round(width * 0.5625) & ~1;
-    const r = await run(FFMPEG_BIN, [
-      "-y", "-ss", fromSeconds.toFixed(3), "-t", durSeconds.toFixed(3), "-i", srcPath,
-      "-vf", `fps=${fps.toFixed(3)},scale=${width}:${height},format=gray`,
-      "-f", "rawvideo", "-pix_fmt", "gray", raw,
-    ]);
-    if (r.code !== 0) return null;
-    const buf = new Uint8Array(await Bun.file(raw).arrayBuffer());
-    const per = width * height;
-    const n = Math.floor(buf.length / per);
-    if (n < 2) return null;
-    const frames: Uint8Array[] = [];
-    for (let i = 0; i < n; i++) frames.push(buf.subarray(i * per, (i + 1) * per));
-    return { frames, width, height };
-  } catch {
-    return null;
-  } finally {
-    void rm(raw, { force: true }).catch(() => {});
-  }
-}
-
 /**
  * emphasize_speaker — push in on whoever has the line.
  *
@@ -1831,49 +1801,13 @@ async function emphasizeSpeakerTool(ctx: BridgeContext, args: Args): Promise<Too
     const dur = r.to - r.from;
     emitProgress("emphasize_speaker", `Looking for who is speaking at ${r.from.toFixed(1)}s…`);
     // Sample faces across the stretch, then measure mouth movement on the same span.
-    const times = [0.2, 0.4, 0.6, 0.8].map((f) => r.from + dur * f);
-    const hits = await detectFacesAt(asset.url, times);
-    const candidates: { x: number; y: number; w: number; h: number }[] = [];
-    for (const boxes of hits ?? []) {
-      for (const b of boxes) {
-        // Same person seen at several instants → one candidate, by overlap.
-        if (!candidates.some((c) => iou(c, b) > 0.3)) candidates.push(b);
-      }
-    }
-    if (candidates.length === 0) {
-      skipped.push(`${r.from.toFixed(1)}s: no face found`);
+    const who = await whoIsSpeaking(asset.url, r.from, dur);
+    if (!who.ok) {
+      skipped.push(`${r.from.toFixed(1)}s: ${who.why}`);
       continue;
     }
-
-    let chosen = candidates[0]!;
-    let note = "";
-    if (candidates.length > 1) {
-      // 960 wide. On a five-person conference grid (faces ~7% of the width) the right face won by
-      // roughly 6x at 320, 640 and 960 alike, so this is headroom rather than a fix: a mouth needs
-      // pixels to measure, and 320 leaves about seven across on a face that size. The whole pass
-      // costs ~1s, so buying margin for smaller faces is cheap.
-      const sampleFps = 8;
-      const g = await grayFrames(asset.url, r.from, Math.min(dur, 6), sampleFps, 960);
-      if (!g) {
-        skipped.push(`${r.from.toFixed(1)}s: could not measure who was talking`);
-        continue;
-      }
-      const mouthSeries: number[][] = candidates.map(() => []);
-      const frameSeries: number[] = [];
-      for (let k = 1; k < g.frames.length; k++) {
-        const a = g.frames[k - 1]!;
-        const b = g.frames[k]!;
-        frameSeries.push(regionMotion(a, b, g.width, g.height, { x: 0, y: 0, w: 1, h: 1 }));
-        candidates.forEach((c, ci) => mouthSeries[ci]!.push(regionMotion(a, b, g.width, g.height, mouthRegion(c))));
-      }
-      const ranked = rankSpeakers(mouthSeries, frameSeries);
-      if (!isConfident(ranked)) {
-        skipped.push(`${r.from.toFixed(1)}s: ${candidates.length} faces and none clearly speaking`);
-        continue;
-      }
-      chosen = candidates[ranked[0]!.index]!;
-      note = ` (of ${candidates.length} faces)`;
-    }
+    const chosen = who.face;
+    const note = who.of > 1 ? ` (of ${who.of} faces)` : "";
 
     const f = framingFor(chosen, zoom);
     // Clip-relative frames, with a short ease in and out so the move reads as a camera push rather
@@ -2139,6 +2073,61 @@ async function autoMulticamTool(ctx: BridgeContext, args: Args): Promise<ToolOut
       `Cut on speech from "${source.assetName}". ${plan.switches} switch(es) across ${described.length} shot(s). ` +
       "If the montage points at the wrong person, the speaker-to-angle mapping is what to fix: pass angleSpeakers (one name per angle, in the same order as angleClipIds) and run it again after undo.",
   });
+}
+
+/**
+ * auto_pan — each voice comes from where its owner is standing.
+ *
+ * Renders a new file rather than adding a property to the clip, which is the same contract as
+ * enhance_audio and denoise_video and is the honest one here: the editor's preview mixes audio in
+ * the browser and knows nothing about a pan automation, so a clip property would produce an export
+ * that sounds different from what was previewed. A rendered asset sounds the same everywhere.
+ */
+async function autoPanTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.mediaRef) ?? strOpt(args.media);
+  const a = ref ? (ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null) : null;
+  if (!a) return fail(`Asset not found: ${ref ?? "(mediaRef is required — pass a library video's id or name)"}`);
+  if (a.type !== "video" || !a.url) return fail("auto_pan needs a VIDEO asset — it places each voice by looking at where its owner is on screen.");
+  if (!a.hasAudio) return fail(`"${a.name}" has no audio track to place.`);
+
+  const d = await loadDiarization(a.url);
+  if (!d || d.turns.length === 0) {
+    return fail(`No speaker turns for "${a.name}" yet — run identify_speakers on it first. auto_pan places each person's lines, so it needs to know whose they are.`);
+  }
+
+  const strength = Math.max(0, Math.min(1, numOpt(args.strength) ?? 0.5));
+  const deadZone = Math.max(0, Math.min(0.5, numOpt(args.deadZone) ?? 0.08));
+  try {
+    const res = await autoPan(a.url, d.turns, {
+      strength,
+      deadZone,
+      rampSeconds: numOpt(args.rampSeconds),
+      minTurnSeconds: numOpt(args.minTurnSeconds),
+      minSilenceSeconds: numOpt(args.minSilenceSeconds),
+      looksPerSpeaker: numOpt(args.looksPerSpeaker),
+      minLooks: numOpt(args.minLooks),
+      maxSpread: numOpt(args.maxSpread),
+      onProgress: (text) => emitProgress("auto_pan", text),
+    });
+    const id = await registerRenderedAsset(ctx, res.file, `${a.name} (placed)`);
+    const placed = res.segments.filter((s) => s.pan !== 0).length;
+    return okJson({
+      asset: id,
+      file: res.file,
+      strength,
+      positions: describePositions(res.positions, strength, deadZone),
+      placements: placed,
+      ...(res.leftCentred.length > 0 ? { leftCentred: res.leftCentred.map((r) => `${r.speaker}: ${r.why}`) } : {}),
+      ...(res.unresolved.length > 0 ? { couldNotTell: res.unresolved.slice(0, 6) } : {}),
+      note:
+        `Added "${a.name} (placed)" to the library — same picture, sound placed across the stereo field. Use it in place of the original. ` +
+        "Positions come from the median of several looks per person, and anybody whose looks disagreed is left centred rather than placed on a guess — say so if the user expected them moved. " +
+        "This suits a fixed camera on a two-shot, a panel or a stage; on footage that cuts between close-ups the on-screen position stops meaning anything, so place the sound BEFORE cutting the picture. " +
+        "Raise strength toward 1 for a wider image, lower it toward 0.2 for a placement the audience feels rather than notices.",
+    });
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
 }
 
 /** Human correction for identify_speakers: REPLACE the cached speaker turns for an asset so
@@ -3542,6 +3531,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         );
       case "auto_multicam":
         return await autoMulticamTool(ctx, args);
+      case "auto_pan":
+        return await autoPanTool(ctx, args);
       case "multicam_cut":
         return ok(
           multicamCut(ctx.doc, {

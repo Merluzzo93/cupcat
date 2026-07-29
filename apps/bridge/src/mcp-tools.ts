@@ -1110,6 +1110,25 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "auto_pan",
+    description:
+      "STEREO PLACEMENT: put each voice where its owner is standing. Finds where every speaker sits in frame (face detection plus the mouth-motion pass, taking the median of several looks so one bad measurement moves nobody), then renders a NEW file — picture stream-copied, sound folded to mono and re-spread with constant-power panning that ramps at each change. Turns a two-shot or a panel from a conference call into a room. Requires identify_speakers first. Best on a FIXED camera: on footage that cuts between close-ups, on-screen position stops meaning anything, so place the sound before cutting the picture. Local, no credits.",
+    inputSchema: obj(
+      {
+        mediaRef: { type: "string", description: "Library video asset id or name. Needs visible faces and speaker turns." },
+        strength: { type: "number", description: "How far to place, 0–1 (default 0.5). 1 is hard left/right — unpleasant on headphones; 0.2 is felt rather than noticed." },
+        deadZone: { type: "number", description: "Fraction of frame width around the centre treated as centre (default 0.08)." },
+        rampSeconds: { type: "number", description: "How long each pan change takes (default 0.12). Longer is smoother and less precise." },
+        minTurnSeconds: { type: "number", description: "Turns shorter than this keep the previous placement (default 0.4)." },
+        minSilenceSeconds: { type: "number", description: "Gaps shorter than this hold the speaker's placement instead of returning to centre (default 1)." },
+        looksPerSpeaker: { type: "integer", description: "How many turns to look at per person (default 5). More is steadier and slower." },
+        minLooks: { type: "integer", description: "Usable looks a position must rest on before it is acted on (default 3). Lower it only for footage you know is a locked-off shot." },
+        maxSpread: { type: "number", description: "How far those looks may disagree, as a fraction of frame width (default 0.12). Anybody above it stays centred." },
+      },
+      ["mediaRef"],
+    ),
+  },
+  {
     name: "auto_multicam",
     description:
       "MULTICAM, AUTOMATIC: cut a synced multi-angle stack to whoever is TALKING, without writing switch points by hand. Reads the speaker turns from identify_speakers, decides the shots (no shot under ~1.5s, a two-word interjection does not move the camera, crosstalk and long silences go to the wide angle if there is one), and performs the switch as one undoable action. THE tool for 'edit this podcast/interview/panel from the multiple cameras'. Requires identify_speakers to have been run on the angle with the best audio. Pass preview:true first to show the plan without touching the timeline — the speaker-to-angle mapping is the one thing worth confirming.",
