@@ -87,6 +87,12 @@ bun build --compile node_modules/@higgsfield/cli/bin/higgsfield.js \
 # old file rides along in the installer:
 #   rm target/release/sidecars/<the file you replaced>
 
+# sound recognition (sidecars/tagging) — sherpa-onnx-offline-audio-tagging.exe + its onnxruntime
+# DLLs (from the win-x64-shared-MD-MinSizeRel-no-tts build), plus the CED-tiny AudioSet model
+# renamed to ced-tiny.int8.onnx and its class_labels_indices.csv, from the
+# github.com/k2-fsa/sherpa-onnx audio-tagging-models release. ~19 MB in total.
+# The label file is NOT optional: caption_sounds maps its display names to the words it writes.
+
 # face detection (apps/faces) — our own Rust sidecar, built from source
 cargo build --release --manifest-path apps/faces/Cargo.toml
 mkdir -p apps/desktop/src-tauri/sidecars/faces

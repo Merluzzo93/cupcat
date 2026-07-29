@@ -1328,6 +1328,24 @@ export const TOOL_DEFS: ToolDef[] = [
     }),
   },
   {
+    name: "caption_sounds",
+    description:
+      "The OTHER half of subtitling: caption what is HEARD but not said — (applause), (laughter), (music), (siren), (dog barking). Required by every accessibility standard and the part deaf viewers miss most; add_captions writes the words, this names the sounds, and a properly subtitled video wants both. Runs a local AudioSet recognizer (offline, no account) over each clip 2 seconds at a time — roughly 20s of work per 2 minutes of footage, so say it's working. Deliberately quiet: anything the model hears as mostly speech is left to add_captions, room tone and 'noise' are never captioned, and a single uncertain window is dropped. On an interview it will usually find nothing, and that is the correct answer. Words come out in Italian or English; for any other language pass them yourself in 'words'.",
+    inputSchema: obj({
+      clipIds: { type: "array", items: { type: "string" }, description: "Optional. Clips to listen to; default is every clip that carries its own sound." },
+      preview: { type: "boolean", description: "List what would be captioned, with confidences, and change nothing." },
+      language: { type: "string", description: "Optional. Language of the captions ('it' or 'en'); defaults to the language of an existing transcript, else English." },
+      words: { type: "object", description: "The word to write for each sound, for a language CupCat doesn't ship — e.g. {\"applause\":\"aplausos\",\"laughter\":\"risas\"}. Keys are the 'sound' values a preview returns; parentheses are added for you. Anything you leave out stays English." },
+      minProbability: { type: "number", description: "How sure the recognizer must be, 0-1 (default 0.4). Raise for fewer, safer captions." },
+      windowSeconds: { type: "number", description: "Listening window (default 2). Longer is faster and coarser." },
+      fontName: { type: "string" },
+      fontSize: { type: "number", description: "Default 40 — smaller than speech captions on purpose." },
+      color: { type: "string" },
+      centerX: { type: "number", description: "Default 0.5." },
+      centerY: { type: "number", description: "Default 0.9." },
+    }),
+  },
+  {
     name: "add_motion_graphic",
     description:
       "AI MOTION GRAPHICS — THE tool for 'aggiungi una lower third / titolo animato / card capitolo / contatore animato / quote card / logo reveal'. Describe the graphic in 'prompt' (include exact text + language): Claude designs a self-contained HTML/CSS animation, it renders locally to a TRANSPARENT overlay (VP9 alpha) at project resolution, and lands on a new top track at startFrame. Free, local, no templates — the saved HTML source is returned so tweaks are one more call (describe the change, or pass edited 'html' directly). Rendering takes ~2-8s per second of animation — tell the user it's working.",

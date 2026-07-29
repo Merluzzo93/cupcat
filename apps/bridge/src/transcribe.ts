@@ -268,6 +268,26 @@ export async function transcribe(path: string, language?: string): Promise<Trans
   }
 }
 
+/**
+ * What language this file was found to be in, IF it has already been transcribed — without
+ * transcribing it.
+ *
+ * caption_sounds writes its words in the speech's language but has no other reason to run whisper on
+ * a recording; making it wait several minutes for a transcript it will not read would be absurd. So
+ * it asks this, and falls back to English when nobody has transcribed the file yet.
+ */
+export async function knownLanguage(path: string): Promise<string | undefined> {
+  for (const [key, tr] of cache) {
+    if (key.includes(`::${path}::`) && tr?.language) return tr.language;
+  }
+  try {
+    const c = (await Bun.file(cacheFileFor(path)).json()) as DiskCache;
+    return c.transcript?.language || undefined;
+  } catch {
+    return undefined; // never transcribed, or the cache is unreadable
+  }
+}
+
 /** Split a segment's text into evenly-timed words (whisper.cpp doesn't give word timings by default). */
 function approximateWords(seg: TSegment): TWord[] {
   const tokens = seg.text.trim().split(/\s+/).filter(Boolean);

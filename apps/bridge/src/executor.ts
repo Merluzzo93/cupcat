@@ -49,6 +49,8 @@ import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScr
 import { intersectRanges, shapeRanges } from "./ranges";
 import { suggestThumbnails } from "./thumbnails";
 import { echoedByPicture } from "./speechclips";
+import { type TaggedWindow, tagAudio, taggingAvailable } from "./audiotag";
+import { captionFor, findBeds, mergeEvents, pickEvent, sanitizeWords, speaksLanguage, type WindowEvent } from "./soundevents";
 import { generate, getModel, type GenerateOptions, type HfModel, listModels, uploadFile } from "./higgsfield";
 import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "./media";
 import { startRecording, stopRecording } from "./recorder";
@@ -65,7 +67,7 @@ import { loadBrandKit, saveBrandKit } from "./brandkit";
 import { magnify, punchIn } from "./zoom";
 import { renderMotionGraphic } from "./motion";
 import { cachedDiarization, type Diarization, diarizeSpeakers, loadDiarization, overrideDiarization, speakerAt, type SpeakerTurn } from "./diarize";
-import { detectRetakes, transcribe } from "./transcribe";
+import { detectRetakes, knownLanguage, transcribe } from "./transcribe";
 import { synthesizeSpeech } from "./tts";
 import { parseSubtitles, toSrt, translateSegments } from "./translate";
 import { importFromUrl } from "./url-import";
@@ -869,6 +871,167 @@ async function addCaptionsTool(doc: EditorDocument, args: Args): Promise<ToolOut
     track.clips.sort((a, b) => a.startFrame - b.startFrame);
   });
   return ok(`Added ${captions.length} caption clip${captions.length === 1 ? "" : "s"} on a new track (group ${groupId}).`);
+}
+
+/**
+ * caption_sounds — the applause, the laughter, the music, written down.
+ *
+ * The half of subtitling that add_captions cannot do: a deaf viewer who reads every word still
+ * misses that the room burst out laughing. Broadcasters have written these lines for decades and
+ * every accessibility standard requires them; no consumer editor generates them.
+ *
+ * Runs the local AudioSet tagger over the recording two seconds at a time and captions only what it
+ * is sure of. The policy for "sure" is in soundevents.ts, and it is deliberately reluctant: speech
+ * always wins over anything heard underneath it, room-tone labels are dropped outright, and a lone
+ * borderline window is discarded. A missing caption is a shrug; a wrong one burned into an export is
+ * a defect the viewer can see.
+ */
+const MAX_SOUND_CAPTION_SECONDS = 5;
+
+async function captionSoundsTool(doc: EditorDocument, args: Args): Promise<ToolOut> {
+  if (!(await taggingAvailable())) {
+    return fail("The sound recognizer isn't installed with this build, so caption_sounds can't run.");
+  }
+  const fps = doc.timeline.fps;
+  const named = (Array.isArray(args.clipIds) ? args.clipIds : []).filter((x): x is string => typeof x === "string");
+
+  // Without an explicit list: every clip that carries its own sound. The audio linked to a video is
+  // the SAME recording as the picture, so tagging both would pay twice and caption twice.
+  const echoes = echoedByPicture(doc.timeline.tracks);
+  const targets: Clip[] = [];
+  for (const t of doc.timeline.tracks) {
+    for (const c of t.clips) {
+      if (c.mediaType !== "video" && c.mediaType !== "audio") continue;
+      if (named.length ? !named.includes(c.id) : echoes.has(c.id)) continue;
+      if (doc.asset(c.mediaRef)?.url) targets.push(c);
+    }
+  }
+  if (targets.length === 0) return fail("No audio or video clips to listen to.");
+
+  const minProb = Math.max(0.1, Math.min(0.95, numOpt(args.minProbability) ?? 0.4));
+  const windowSeconds = Math.max(1, Math.min(10, numOpt(args.windowSeconds) ?? 2));
+  const preview = args.preview === true;
+  const cx = numOpt(args.centerX) ?? 0.5;
+  const cy = numOpt(args.centerY) ?? 0.9;
+  const style = {
+    fontName: strOpt(args.fontName) ?? "Helvetica-Bold",
+    fontSize: numOpt(args.fontSize) ?? 40,
+    color: strOpt(args.color) ?? "#ffffff",
+  };
+  const groupId = newId("snd");
+  const words = sanitizeWords(args.words);
+
+  // One asset may sit on the timeline several times; tag its audio once.
+  const tagged = new Map<string, TaggedWindow[]>();
+  const beds = new Map<string, number>();
+  const captions: Clip[] = [];
+  const found: { clipId: string; startSeconds: number; endSeconds: number; sound: string; text: string; confidence: number }[] = [];
+  const languages = new Set<string>();
+  let fellBackToEnglish = false;
+
+  for (const c of targets) {
+    const asset = doc.asset(c.mediaRef)!;
+    const url = asset.url!;
+    let windows = tagged.get(url);
+    if (!windows) {
+      emitProgress("caption_sounds", `Listening to "${asset.name}"…`);
+      try {
+        windows = await tagAudio(url, {
+          windowSeconds,
+          onProgress: (done, total) => {
+            if (done === total || done % 15 === 0) emitProgress("caption_sounds", `"${asset.name}" ${done}/${total}`);
+          },
+        });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+      tagged.set(url, windows);
+    }
+
+    const language = strOpt(args.language) ?? (await knownLanguage(url));
+    if (language) languages.add(language);
+
+    // A sound heard through the whole recording characterises it and is not a moment in it.
+    const bedKeys = new Set(findBeds(windows, { minProb }).map((b) => b.key));
+    for (const b of findBeds(windows, { minProb })) beds.set(b.key, Math.max(beds.get(b.key) ?? 0, b.share));
+
+    const hits: WindowEvent[] = [];
+    for (const w of windows) {
+      const ev = pickEvent(w.tags, { minProb });
+      if (ev && !bedKeys.has(ev.key)) hits.push({ startSeconds: w.startSeconds, endSeconds: w.endSeconds, ...ev });
+    }
+    for (const ev of mergeEvents(hits, { gapSeconds: windowSeconds / 4 })) {
+      const sf = sourceToProjectFrame(c, ev.startSeconds, fps);
+      if (sf == null) continue; // the sound is in a part of the file this clip trimmed away
+      // A caption names the sound; it does not have to sit there for as long as the sound lasts.
+      const shownUntil = Math.min(ev.endSeconds, ev.startSeconds + MAX_SOUND_CAPTION_SECONDS);
+      const ef = sourceToProjectFrame(c, shownUntil, fps) ?? sf + Math.round(fps * windowSeconds);
+      const text = captionFor(ev.key, language, words);
+      if (!speaksLanguage(language) && !words[ev.key]) fellBackToEnglish = true;
+      found.push({
+        clipId: c.id,
+        startSeconds: Number(ev.startSeconds.toFixed(2)),
+        endSeconds: Number(ev.endSeconds.toFixed(2)),
+        sound: ev.key,
+        text,
+        confidence: Number(ev.confidence.toFixed(2)),
+      });
+      captions.push(makeCaption(text, sf, Math.max(1, ef - sf), groupId, style, cx, cy));
+    }
+  }
+
+  const heard = [...new Set(found.map((f) => f.sound))];
+  // What was heard everywhere, so the caller knows it was considered and why it produced nothing.
+  const underneath = [...beds].map(([key, share]) => `${key} (${Math.round(share * 100)}% of it)`);
+  const bedNote = underneath.length
+    ? `Heard under most of the recording and therefore NOT captioned as moments: ${underneath.join(", ")}. A sound that never stops is a bed, not an event — and the recognizer reports music under loud amplified speech where there is none, so verify before repeating that to the user. `
+    : "";
+
+  if (found.length === 0) {
+    return okJson({
+      captions: 0,
+      ...(underneath.length ? { heardThroughout: underneath } : {}),
+      note:
+        `Nothing worth captioning in ${targets.length} clip${targets.length === 1 ? "" : "s"}. ` +
+        bedNote +
+        "Every other window was speech, silence or room tone — the normal answer for an interview or a talking head. Sound captions are for footage with an audience, a room, or something that happens. " +
+        `Lower minProbability (now ${minProb}) to hear the model's less certain guesses, but expect to check them.`,
+    });
+  }
+  if (preview) {
+    return okJson({
+      preview: true,
+      sounds: found,
+      ...(underneath.length ? { heardThroughout: underneath } : {}),
+      note:
+        `${found.length} sound caption${found.length === 1 ? "" : "s"} would be added (${heard.join(", ")}). ` +
+        bedNote +
+        (fellBackToEnglish
+          ? `The words would be ENGLISH: CupCat ships them in English and Italian only${languages.size ? `, and the speech is ${[...languages].join(", ")}` : ""}. Pass words:{${heard.map((k) => `"${k}":"…"`).join(", ")}} on the real run. `
+          : "") +
+        "Nothing has changed yet — run again without preview to add them. Show the list first if any confidence is near the threshold.",
+    });
+  }
+
+  doc.mutate("Caption Sounds", "agent", () => {
+    const idx = doc.insertTrack(0, "video");
+    const track = doc.timeline.tracks[idx]!;
+    track.clips.push(...captions);
+    track.clips.sort((a, b) => a.startFrame - b.startFrame);
+  });
+  return okJson({
+    captions: captions.length,
+    sounds: found,
+    group: groupId,
+    ...(underneath.length ? { heardThroughout: underneath } : {}),
+    note:
+      `Wrote ${captions.length} sound caption${captions.length === 1 ? "" : "s"} on a new track (${heard.join(", ")}). ` +
+      bedNote +
+      (fellBackToEnglish
+        ? `The words are ENGLISH: CupCat ships them in English and Italian only${languages.size ? `, and the speech is ${[...languages].join(", ")}` : ""}. YOU speak the language — undo, then call again with words:{${heard.map((k) => `"${k}":"…"`).join(", ")}} filled in. `
+        : "") +
+      "These name sounds; add_captions writes the words people say, and a subtitled video normally wants both.",
+  });
 }
 
 // ── Named version snapshots ───────────────────────────────────────────────────
@@ -3324,6 +3487,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         return await getTranscriptTool(ctx.doc, args);
       case "add_captions":
         return await addCaptionsTool(ctx.doc, args);
+      case "caption_sounds":
+        return await captionSoundsTool(ctx.doc, args);
       case "import_captions":
         return await importCaptionsTool(ctx.doc, args);
       case "export_captions":

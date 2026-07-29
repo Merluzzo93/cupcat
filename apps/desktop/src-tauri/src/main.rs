@@ -52,6 +52,13 @@ fn build_sidecar(app: &tauri::AppHandle) -> Result<tauri_plugin_shell::process::
             p("separate/sherpa-onnx-offline-source-separation.exe"),
         )
         .env("CUPCAT_SEPARATE_DIR", p("separate"))
+        // Sound recognition for caption_sounds (sherpa-onnx + the CED AudioSet model): its own CLI
+        // exe + DLLs + ced-tiny.int8.onnx and the label list, in sidecars/tagging.
+        .env(
+            "CUPCAT_TAGGING_BIN",
+            p("tagging/sherpa-onnx-offline-audio-tagging.exe"),
+        )
+        .env("CUPCAT_TAGGING_DIR", p("tagging"))
         // Local face detection (YuNet on ONNX Runtime), linked against diarization's onnxruntime.
         .env("CUPCAT_FACES_BIN", p("faces/cupcat-faces.exe"))
         .env("CUPCAT_FACES_MODEL", p("faces/yunet.onnx"))

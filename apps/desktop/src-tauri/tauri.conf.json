@@ -32,7 +32,7 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/cupcat-bridge"],
-    "resources": ["sidecars/*", "sidecars/piper", "sidecars/diarize", "sidecars/separate", "sidecars/faces"],
+    "resources": ["sidecars/*", "sidecars/piper", "sidecars/diarize", "sidecars/separate", "sidecars/faces", "sidecars/tagging"],
     "windows": {
       "nsis": {
         "installMode": "currentUser",

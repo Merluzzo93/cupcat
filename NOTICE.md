@@ -31,7 +31,8 @@ The Windows installer ships these third-party tools as sidecars; each keeps its 
 - **whisper.cpp** (`whisper-cli` + ggml libraries) — MIT, © ggml-org / G. Gerganov. (github.com/ggml-org/whisper.cpp)
 - **ggml large-v3-turbo (q5) & ggml-base** speech models — derived from OpenAI Whisper (MIT), redistributed via whisper.cpp.
 - **yt-dlp** — Unlicense (public domain); used for URL imports the user requests. (github.com/yt-dlp/yt-dlp)
-- **sherpa-onnx** (`sherpa-onnx-offline-speaker-diarization` + onnxruntime) — Apache-2.0, © k2-fsa / Xiaomi Corp. Used for on-device speaker diarization. (github.com/k2-fsa/sherpa-onnx)
+- **sherpa-onnx** (`sherpa-onnx-offline-speaker-diarization`, `sherpa-onnx-offline-source-separation`, `sherpa-onnx-offline-audio-tagging` + onnxruntime) — Apache-2.0, © k2-fsa / Xiaomi Corp. Used for on-device speaker diarization, stem separation and sound recognition. (github.com/k2-fsa/sherpa-onnx)
+- **CED** audio-tagging model (`ced-tiny`, trained on AudioSet) — Apache-2.0, © Xiaomi Corp (github.com/RicherMans/CED), redistributed via sherpa-onnx. Its AudioSet class list (`class_labels_indices.csv`) is CC-BY-4.0, © Google. Used by `caption_sounds` to name applause, laughter, music and the rest.
 - **pyannote segmentation-3.0** speaker segmentation model (ONNX export) — MIT, © pyannote (huggingface.co/pyannote/segmentation-3.0); **3D-Speaker CAM++** speaker embedding model (`campplus_sv_zh_en_16k-common_advanced`, trained on VoxCeleb + CNCeleb + 3D-Speaker) — Apache-2.0, © Alibaba 3D-Speaker. Both redistributed via sherpa-onnx.
 - **YuNet** face detection model (`face_detection_yunet_2023mar.onnx`) — MIT, © Shiqi Yu and contributors,
   redistributed via OpenCV Zoo (github.com/opencv/opencv_zoo). Run on-device by `cupcat-faces`, our own
