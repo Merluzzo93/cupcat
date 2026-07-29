@@ -1,0 +1,67 @@
+{
+  "ffmpeg": {
+    "latest": "2026-07-28",
+    "shipped": "N-125444-g6d72600a30-20260703",
+    "checked": "2026-07-29"
+  },
+  "yt-dlp": {
+    "latest": "2026.07.04",
+    "shipped": "2026.07.04",
+    "checked": "2026-07-29"
+  },
+  "whisper.cpp": {
+    "latest": "v1.9.1",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "sherpa-onnx": {
+    "latest": "asr-models-qnn-binary-3",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "piper": {
+    "latest": "v1.6.0",
+    "shipped": "1.2.0",
+    "checked": "2026-07-29"
+  },
+  "palmier-pro": {
+    "latest": "v0.6.15",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "opencut": {
+    "latest": "v0.3.0",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "auto-editor": {
+    "latest": "31.4.0",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "mcp-video": {
+    "latest": "v1.11.1",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "hyperframes": {
+    "latest": "2026-07-03 @734b404",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "OpenTimelineIO": {
+    "latest": "v0.18.1",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "PySceneDetect": {
+    "latest": "v0.7.1",
+    "shipped": null,
+    "checked": "2026-07-29"
+  },
+  "claude-code-docs": {
+    "latest": "v2.1.220",
+    "shipped": null,
+    "checked": "2026-07-29"
+  }
+}

@@ -16,6 +16,7 @@
     "build:bridge": "bun run build:core && bun build --compile apps/bridge/src/index.ts --outfile dist-bridge/cupcat-bridge.exe",
     "web": "bun run build:core && bun --filter @cupcat/web dev",
     "bridge": "bun run build:core && bun --filter @cupcat/bridge dev",
+    "upstream": "bun run tools/upstream/check.ts",
     "typecheck": "bun run build:core && bun --filter @cupcat/editor-core typecheck && bun --filter @cupcat/bridge typecheck && bun --filter @cupcat/web typecheck"
   },
   "engines": {
