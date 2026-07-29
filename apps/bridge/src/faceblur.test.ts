@@ -3,7 +3,7 @@
 // the decisions that are easy to get subtly wrong and impossible to eyeball in a rendered frame.
 
 import { describe, expect, it } from "bun:test";
-import { buildTracks, iou, padBox, parseBoxes, parseFrameBatch, parseSidecarLine, supportsFilterScriptFromFile, trackExpr } from "./faceblur";
+import { buildTracks, iou, padBox, parseBoxes, parseFrameBatch, parseSidecarLine, simplifyTrack, supportsFilterScriptFromFile, trackExpr } from "./faceblur";
 
 describe("parseBoxes", () => {
   it("reads a clean array", () => {
@@ -126,18 +126,32 @@ describe("trackExpr", () => {
     { t: 1, x: 0.2, y: 0, w: 0.2, h: 0.2 },
   ];
 
+  /** Evaluate the expression the way ffmpeg does. Checking the STRING would only prove it looks
+   *  like the last version of itself; checking the path proves the patch lands on the face. */
+  const at = (expr: string, t: number): number =>
+    (new Function("t", "clip", `return ${expr};`) as (t: number, clip: (x: number, a: number, b: number) => number) => number)(
+      t,
+      (x, a, c) => Math.max(a, Math.min(c, x)),
+    );
+
   it("is a bare number for a single sample", () => {
     expect(trackExpr([pts[0]!], (b) => b.x, 100)).toBe("10");
   });
 
-  it("interpolates between samples and holds the last value after the end", () => {
+  it("interpolates between samples", () => {
     const e = trackExpr(pts, (b) => b.x, 100);
-    expect(e).toContain("if(lt(t,1.000)");
-    expect(e).toContain("(10+(10)*(t-0.000)/1.000)");
-    expect(e.endsWith(",20)")).toBe(true); // tail holds the final position
+    expect(at(e, 0)).toBeCloseTo(10, 3);
+    expect(at(e, 0.5)).toBeCloseTo(15, 3);
+    expect(at(e, 1)).toBeCloseTo(20, 3);
   });
 
-  it("emits a constant instead of a division when the value doesn't move", () => {
+  it("holds the first value before the track starts and the last after it ends", () => {
+    const e = trackExpr(pts, (b) => b.x, 100);
+    expect(at(e, -5)).toBeCloseTo(10, 3);
+    expect(at(e, 99)).toBeCloseTo(20, 3);
+  });
+
+  it("emits a constant when the value doesn't move", () => {
     const flat = trackExpr(
       [
         { t: 0, x: 0.5, y: 0, w: 0.2, h: 0.2 },
@@ -146,7 +160,7 @@ describe("trackExpr", () => {
       (b) => b.x,
       100,
     );
-    expect(flat).toBe("if(lt(t,1.000),50,50)");
+    expect(flat).toBe("50");
   });
 
   it("never emits a zero denominator for samples at the same instant", () => {
@@ -158,7 +172,98 @@ describe("trackExpr", () => {
       (b) => b.x,
       100,
     );
-    expect(e).not.toContain("/0.000");
+    expect(e).not.toContain("Infinity");
+    expect(at(e, 1)).toBeCloseTo(10, 3);
+  });
+
+  it("stays FLAT however many samples there are", () => {
+    // The bug this replaced: one nested if() per sample, and ffmpeg's parser gives up past a certain
+    // depth with "Missing ')' or too many args". A face followed for two minutes produced 109
+    // samples and blur_faces failed on every attempt. Nothing here nests.
+    const many = Array.from({ length: 120 }, (_, i) => ({ t: i * 0.5, x: 0.1 + (i % 7) * 0.02, y: 0, w: 0.2, h: 0.2 }));
+    const e = trackExpr(many, (b) => b.x, 1000);
+    expect(e).not.toContain("if(");
+    let depth = 0;
+    let deepest = 0;
+    for (const ch of e) {
+      if (ch === "(") deepest = Math.max(deepest, ++depth);
+      else if (ch === ")") depth--;
+    }
+    expect(deepest).toBeLessThanOrEqual(2);
+  });
+
+  it("follows a long path accurately, sample by sample", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ t: i * 0.5, x: 0.1 + Math.sin(i) * 0.05, y: 0, w: 0.2, h: 0.2 }));
+    const e = trackExpr(many, (b) => b.x, 1000);
+    for (const p of many) expect(at(e, p.t)).toBeCloseTo(Math.round(p.x * 1000), 2);
+  });
+});
+
+describe("simplifyTrack", () => {
+  const path = (n: number, f: (i: number) => number) =>
+    Array.from({ length: n }, (_, i) => ({ t: i * 0.5, x: f(i), y: 0.5, w: 0.2, h: 0.2 }));
+
+  it("leaves a short track exactly as it is", () => {
+    const p = path(10, (i) => 0.1 + i * 0.01);
+    expect(simplifyTrack(p, 60)).toEqual(p);
+  });
+
+  it("brings a long track inside the limit", () => {
+    const p = path(300, (i) => 0.3 + Math.sin(i / 5) * 0.2);
+    expect(simplifyTrack(p, 60).length).toBeLessThanOrEqual(60);
+  });
+
+  it("keeps the ends, so the patch still starts and stops where the face does", () => {
+    const p = path(300, (i) => 0.3 + Math.sin(i / 5) * 0.2);
+    const s = simplifyTrack(p, 60);
+    expect(s[0]).toEqual(p[0]!);
+    expect(s[s.length - 1]).toEqual(p[p.length - 1]!);
+  });
+
+  it("stays in time order and never invents a sample", () => {
+    const p = path(300, (i) => 0.3 + Math.sin(i / 5) * 0.2);
+    const s = simplifyTrack(p, 60);
+    for (let i = 1; i < s.length; i++) expect(s[i]!.t).toBeGreaterThan(s[i - 1]!.t);
+    for (const k of s) expect(p).toContain(k);
+  });
+
+  it("collapses a straight line to its two ends", () => {
+    // Nothing is lost by dropping the middle of a constant-velocity move, and this is what makes
+    // room for the moments that do change.
+    expect(simplifyTrack(path(200, (i) => 0.1 + i * 0.001), 60)).toHaveLength(2);
+  });
+
+  it("spends its budget where the movement is, not evenly", () => {
+    // Still for the first half, darting about in the second. Dropping every other sample would
+    // treat both halves alike and smear exactly the part where the patch has to keep up.
+    const p = path(200, (i) => (i < 100 ? 0.2 : 0.2 + Math.sin(i) * 0.15));
+    const s = simplifyTrack(p, 40);
+    const late = s.filter((k) => k.t >= 50).length;
+    expect(late).toBeGreaterThan(s.length * 0.7);
+  });
+
+  it("follows the original path closely, not just approximately", () => {
+    const p = path(300, (i) => 0.3 + Math.sin(i / 5) * 0.2);
+    const s = simplifyTrack(p, 60);
+    const at = (t: number) => {
+      for (let i = 1; i < s.length; i++) {
+        if (s[i]!.t >= t) {
+          const a = s[i - 1]!;
+          const b = s[i]!;
+          return a.x + ((b.x - a.x) * (t - a.t)) / (b.t - a.t);
+        }
+      }
+      return s[s.length - 1]!.x;
+    };
+    // Worst deviation as a fraction of frame width. The patch's padding is far wider than this.
+    const worst = Math.max(...p.map((k) => Math.abs(at(k.t) - k.x)));
+    expect(worst).toBeLessThan(0.03);
+  });
+
+  it("a degenerate request is refused rather than returning nothing", () => {
+    const p = path(100, (i) => i * 0.001);
+    expect(simplifyTrack(p, 1)).toEqual(p);
+    expect(simplifyTrack([], 60)).toEqual([]);
   });
 });
 

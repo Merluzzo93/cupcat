@@ -48,6 +48,7 @@ import { trackMotion } from "./track-local";
 import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, isHeavySource, probeMedia, sourceTimecode, videoStills } from "./ffmpeg";
 import { intersectRanges, shapeRanges } from "./ranges";
 import { suggestThumbnails } from "./thumbnails";
+import { echoedByPicture } from "./speechclips";
 import { generate, getModel, type GenerateOptions, type HfModel, listModels, uploadFile } from "./higgsfield";
 import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "./media";
 import { startRecording, stopRecording } from "./recorder";
@@ -743,10 +744,13 @@ async function getTranscriptTool(doc: EditorDocument, args: Args): Promise<ToolO
   type TWordRow = [string, number, number] | [string, number, number, string];
   const clips: { clipId: string; trackIndex: number; words: TWordRow[] }[] = [];
   let anySpeakers = false;
+  const echoes = echoedByPicture(doc.timeline.tracks);
   for (let ti = 0; ti < doc.timeline.tracks.length; ti++) {
     for (const c of doc.timeline.tracks[ti]!.clips) {
       if (c.mediaType !== "video" && c.mediaType !== "audio") continue;
       if (only && c.id !== only) continue;
+      // …unless the caller named that audio clip specifically, in which case it is what they asked for.
+      if (!only && echoes.has(c.id)) continue;
       const asset = doc.asset(c.mediaRef);
       if (!asset?.url) continue;
       const tr = await transcribe(asset.url, strOpt(args.language));

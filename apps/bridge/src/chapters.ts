@@ -18,7 +18,11 @@ const SYSTEM = [
   "- The first chapter MUST start at t=0.",
   "- Chapters follow topic changes, not fixed intervals. A section that runs long stays one chapter.",
   "- Titles are 2-6 words, concrete and specific to what is said. No numbering, no 'Part 1', no clickbait.",
-  "- Write titles in the same language as the transcript.",
+  // Naming a language code here was worse than useless: whisper.cpp does not always report one, the
+  // code then fell back to 'en', and a transcript of plainly Italian speech was labelled English —
+  // so the model dutifully wrote English chapter titles for an Italian video. Judging by the words
+  // themselves cannot be wrong in that way.
+  "- Write the titles in THE SAME LANGUAGE AS THE WORDS in the transcript below. Judge that from the words themselves, not from any label. Italian words mean Italian titles.",
   "- Aim for one chapter every 1-4 minutes of material; never more than 20 in total.",
 ].join("\n");
 
@@ -98,7 +102,7 @@ export async function detectChapters(
   }
   progress("Finding the topic changes…");
   const user = [
-    `Video duration: ${(opts.durationSeconds ?? 0).toFixed(0)}s. Transcript language: ${tr.language}.`,
+    `Video duration: ${(opts.durationSeconds ?? 0).toFixed(0)}s.`,
     "",
     "TRANSCRIPT (one line per ~15s):",
     transcriptDigest(tr),

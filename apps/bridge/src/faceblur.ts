@@ -496,7 +496,10 @@ export async function renderFaceBlur(srcPath: string, opts: BlurOptions = {}): P
   let label = "base";
   parts.push(`[0:v]split=${tracks.length + 1}[${label}]${tracks.map((_, i) => `[f${i}]`).join("")}`);
   let covered = 0;
-  tracks.forEach((tr, i) => {
+  tracks.forEach((track, i) => {
+    // Simplified first: the expression below carries one term per sample, and ffmpeg refuses a path
+    // with too many of them.
+    const tr = { pts: simplifyTrack(track.pts) };
     const X = trackExpr(tr.pts, (b) => b.x, W);
     const Y = trackExpr(tr.pts, (b) => b.y, H);
     // One patch size per track (the widest the face ever gets) — a size that changed per frame would
@@ -522,10 +525,20 @@ export async function renderFaceBlur(srcPath: string, opts: BlurOptions = {}): P
     const feather = `format=yuva420p,geq=lum='p(X,Y)':cb='p(X,Y)':cr='p(X,Y)':a='255*clip((1.0-hypot((X-${Math.round(
       w / 2,
     )})/${Math.max(1, Math.round(w / 2))}\\,(Y-${Math.round(h / 2)})/${Math.max(1, Math.round(h / 2))}))/0.28\\,0\\,1)'`;
-    parts.push(`[f${i}]crop=${w}:${h}:'${X}':'${Y}',${cover},${feather}[b${i}]`);
+    // Clamped so the window can never leave the picture. The patch is ONE size for the whole track
+    // — the widest that face ever gets — so at a moment when the face is small and near an edge, the
+    // window around it runs off the frame. crop rejects that outright ("Invalid argument") and the
+    // whole render dies with nothing written. Measured on real footage: 14 of 36 tracks asked for a
+    // window past the right edge, which is why blur_faces failed on it every single time.
+    //
+    // Both crop and overlay use the SAME clamped expression. Clamping only the crop would paste the
+    // patch at the unclamped position — the blur would sit beside the face instead of on it.
+    const Xc = `clip(${X},0,${Math.max(0, W - w)})`;
+    const Yc = `clip(${Y},0,${Math.max(0, H - h)})`;
+    parts.push(`[f${i}]crop=${w}:${h}:'${Xc}':'${Yc}',${cover},${feather}[b${i}]`);
     // enable=between: outside the track's life the patch is not drawn at all, so a face that leaves
     // the shot doesn't leave a smear parked where it used to be.
-    parts.push(`[${label}][b${i}]overlay=x='${X}':y='${Y}':enable='between(t,${t0},${t1})'[ov${i}]`);
+    parts.push(`[${label}][b${i}]overlay=x='${Xc}':y='${Yc}':enable='between(t,${t0},${t1})'[ov${i}]`);
     label = `ov${i}`;
   });
 
@@ -573,18 +586,102 @@ export async function renderFaceBlur(srcPath: string, opts: BlurOptions = {}): P
   return { file: out, faces: tracks.length, coveredSeconds: Math.round(covered * 10) / 10 };
 }
 
+/** Largest path this can express. Measured against the bundled ffmpeg: a crop expression built from
+ *  80 ramps configures fine and one built from 100 fails outright with "Failed to configure input
+ *  pad", so the evaluator gives out somewhere between. 60 leaves room for the clamp wrapper and for
+ *  a build whose limit is a little lower. */
+export const MAX_TRACK_POINTS = 60;
+
+/**
+ * Fewer samples, same path.
+ *
+ * A face followed for two minutes is sampled a hundred-odd times, and every sample is a term in the
+ * filter expression — past ffmpeg's limit, where the render does not degrade but dies. Dropping
+ * every other sample would blur the fast movements (exactly where the patch must keep up) and keep
+ * redundant ones through the slow stretches.
+ *
+ * So this drops the samples that lie closest to the straight line between their neighbours
+ * (Ramer–Douglas–Peucker, measuring error in position rather than in time), tightening the
+ * tolerance until the path fits. A sample is kept or dropped WHOLE — x and y together — so the two
+ * expressions stay in step with each other and with the patch's life.
+ */
+export function simplifyTrack(pts: FaceBox[], maxPoints = MAX_TRACK_POINTS): FaceBox[] {
+  if (pts.length <= maxPoints || maxPoints < 2) return pts;
+
+  const keepFor = (eps: number): number[] => {
+    const keep = new Set<number>([0, pts.length - 1]);
+    const walk = (a: number, c: number): void => {
+      if (c - a < 2) return;
+      const pa = pts[a]!;
+      const pc = pts[c]!;
+      const span = pc.t - pa.t;
+      let worst = -1;
+      let worstErr = 0;
+      for (let i = a + 1; i < c; i++) {
+        const p = pts[i]!;
+        const f = span > 0 ? (p.t - pa.t) / span : 0;
+        const err = Math.max(Math.abs(p.x - (pa.x + (pc.x - pa.x) * f)), Math.abs(p.y - (pa.y + (pc.y - pa.y) * f)));
+        if (err > worstErr) {
+          worstErr = err;
+          worst = i;
+        }
+      }
+      if (worst < 0 || worstErr <= eps) return;
+      keep.add(worst);
+      walk(a, worst);
+      walk(worst, c);
+    };
+    walk(0, pts.length - 1);
+    return [...keep].sort((m, n) => m - n);
+  };
+
+  // Tolerance by bisection: the smallest that fits, so no more detail is thrown away than the limit
+  // demands. Bounded iterations rather than a convergence test — this runs per track per render.
+  let lo = 0;
+  let hi = 1;
+  let best = keepFor(hi);
+  for (let i = 0; i < 24 && best.length > maxPoints; i++) {
+    hi *= 2;
+    best = keepFor(hi);
+  }
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    const got = keepFor(mid);
+    if (got.length > maxPoints) lo = mid;
+    else {
+      hi = mid;
+      best = got;
+    }
+  }
+  return best.map((i) => pts[i]!);
+}
+
 export function trackExpr(pts: FaceBox[], pick: (b: FaceBox) => number, scale: number): string {
   const v = (b: FaceBox) => Math.round(pick(b) * scale);
+  if (pts.length === 0) return "0";
   if (pts.length === 1) return String(v(pts[0]!));
-  let expr = String(v(pts[pts.length - 1]!)); // tail: hold the last value
-  for (let i = pts.length - 2; i >= 0; i--) {
-    const a = pts[i]!;
-    const b = pts[i + 1]!;
-    const va = v(a);
-    const vb = v(b);
-    const dt = Math.max(0.001, b.t - a.t);
-    const seg = va === vb ? String(va) : `(${va}+(${vb - va})*(t-${a.t.toFixed(3)})/${dt.toFixed(3)})`;
-    expr = `if(lt(t,${b.t.toFixed(3)}),${seg},${expr})`;
+  // A flat SUM of clipped ramps, not nested conditionals. clip(t-t0,0,w) is zero before the ramp,
+  // rises across it, and stays at its full width afterwards, so adding one term per sample builds
+  // the whole path with no nesting at all.
+  //
+  // Nesting was the bug. `if(lt(t,…), …, if(lt(t,…), …))` nests once per sample, and ffmpeg's
+  // expression parser gives up past a certain depth with "Missing ')' or too many args" — an error
+  // that names a syntax problem for something that is really a depth limit. A face followed across
+  // two minutes produced 109 samples and blur_faces died on every attempt. The sum is the same
+  // piecewise-linear path, in one flat line.
+  //
+  // Before the first sample the value is the first sample's; after the last it holds the last —
+  // the same contract as before, and what keeps a patch parked correctly at the edges of its life.
+  const terms: string[] = [String(v(pts[0]!))];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]!;
+    const b2 = pts[i]!;
+    const dt = b2.t - a.t;
+    if (dt <= 0) continue; // two samples at the same instant: no ramp to build, and no division by zero
+    const slope = (v(b2) - v(a)) / dt;
+    if (slope === 0) continue; // a value that does not move contributes nothing
+    terms.push(`${slope.toFixed(4)}*clip(t-${a.t.toFixed(3)},0,${dt.toFixed(3)})`);
   }
-  return expr;
+  return terms.join("+");
 }
+

@@ -335,7 +335,12 @@ async function transcribeCpp(path: string, language?: string): Promise<Transcrip
   // real word-level timing (the plain -oj JSON only has segment offsets). Verified on real
   // footage: mid-segment token offsets track measured speech onsets/pauses within ~50ms.
   const args = ["-m", model, "-f", wav, "-ojf", "-of", outBase, "-t", String(threads)];
-  if (language) args.push("-l", language);
+  // "auto" rather than nothing when the caller has no hint. whisper.cpp's default language is
+  // ENGLISH, not detection: on Italian speech it still transcribes the Italian correctly — the model
+  // is multilingual — but it REPORTS "en", and everything downstream believed it. That is how a
+  // plainly Italian video came back with English chapter titles. With -l auto it detected Italian at
+  // p=0.99 on the same file and reported it.
+  args.push("-l", language || "auto");
   const { code } = await run(WHISPER_BIN, args);
   const jsonPath = `${outBase}.json`;
   const f = Bun.file(jsonPath);
