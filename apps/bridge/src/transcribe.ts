@@ -209,10 +209,25 @@ interface DiskCache {
 
 const cacheFileFor = (path: string) => join(mediaDir, ".transcripts", `${basename(path, extname(path))}.cupcat.json`);
 
-/** Identity of everything that can change a transcript, besides the source bytes. */
+/**
+ * Identity of everything that can change a transcript, besides the source bytes.
+ *
+ * `RECIPE` is bumped when CupCat itself starts producing a different transcript from the same file
+ * and the same model. Without it a fix cannot reach anything already transcribed: whisper.cpp's
+ * default is ENGLISH, not auto-detect, so every transcript made before 1.8.0 was decoded as English
+ * and labelled "en" whatever was actually spoken — and the cache would have kept serving exactly
+ * that, on a build that had just been fixed. Re-transcribing once is the price of the fix landing.
+ */
+const RECIPE = "auto-language";
+
+/** The pure part, so the recipe token cannot be tidied away without a test noticing. */
+export function transcriptCacheKey(kind: string, model: string, language?: string): string {
+  return `${kind}::${model}::${language ?? ""}::${RECIPE}`;
+}
+
 async function backendKey(language?: string): Promise<string> {
   const model = WHISPER_KIND === "cpp" ? ((await resolveBestModel()) ?? "none") : WHISPER_MODEL;
-  return `${WHISPER_KIND}::${model}::${language ?? ""}`;
+  return transcriptCacheKey(WHISPER_KIND, model, language);
 }
 
 async function readDiskCache(path: string, language?: string): Promise<Transcript | null> {
