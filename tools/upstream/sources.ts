@@ -63,8 +63,9 @@ export const SOURCES: Source[] = [
     id: "sherpa-onnx",
     repo: "k2-fsa/sherpa-onnx",
     kind: "bundled",
-    role: "Speaker diarization (who talks when) and source separation (voice/music stems).",
-    watchFor: "Better diarization models, and any change to the CLI flags CupCat calls.",
+    role: "Speaker diarization (who talks when), source separation (voice/music stems), and sound recognition (caption_sounds).",
+    watchFor:
+      "Better diarization models, and any change to the CLI flags CupCat calls. The audio tagger is the newest of the three and the one whose output CupCat parses by regex — `AudioEvent(name=…, index=…, prob=…)`. If that line's shape changes, caption_sounds silently finds no sounds at all rather than failing.",
   }),
   S({
     id: "piper",

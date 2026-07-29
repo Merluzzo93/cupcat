@@ -81,6 +81,10 @@ titles, a Ctrl+K command palette that falls back to the assistant.
 | `track_motion` | Pin text/stickers to a moving subject | template matching |
 | `dub_timeline` | Transcribe → translate → speak → time-fit a dub track | Whisper + Piper TTS |
 | `add_captions` / `translate_captions` | Karaoke captions + translations | Whisper + Claude |
+| `caption_sounds` | Name what is *heard* — (applause), (laughter), (siren) | sherpa-onnx + CED (AudioSet) |
+| `auto_multicam` | Cut a multi-camera conversation on who is speaking | diarization + face detection |
+| `auto_pan` | Place each voice where its owner stands on screen | face detection + ffmpeg |
+| `suggest_thumbnails` | Pick a cover by measuring focus, exposure, faces | Laplacian variance + YuNet |
 | `add_motion_graphic` / `make_transition` | Claude writes an animated HTML/CSS overlay → alpha video | Edge headless + VP9 |
 | `identify_speakers` | Speaker diarization | sherpa-onnx |
 | Semantic `search_media` | Find clips by name, generation prompt, or what's spoken | token index |

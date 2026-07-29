@@ -873,6 +873,10 @@ async function addCaptionsTool(doc: EditorDocument, args: Args): Promise<ToolOut
   return ok(`Added ${captions.length} caption clip${captions.length === 1 ? "" : "s"} on a new track (group ${groupId}).`);
 }
 
+/** A caption NAMES a sound; it does not have to sit there for as long as the sound lasts. Without
+ * this, five minutes of music under the credits would be one caption on screen for five minutes. */
+const MAX_SOUND_CAPTION_SECONDS = 5;
+
 /**
  * caption_sounds — the applause, the laughter, the music, written down.
  *
@@ -882,12 +886,11 @@ async function addCaptionsTool(doc: EditorDocument, args: Args): Promise<ToolOut
  *
  * Runs the local AudioSet tagger over the recording two seconds at a time and captions only what it
  * is sure of. The policy for "sure" is in soundevents.ts, and it is deliberately reluctant: speech
- * always wins over anything heard underneath it, room-tone labels are dropped outright, and a lone
- * borderline window is discarded. A missing caption is a shrug; a wrong one burned into an export is
- * a defect the viewer can see.
+ * always wins over anything heard underneath it, room-tone labels are dropped outright, a sound
+ * heard through the whole recording is reported rather than captioned, and a lone borderline window
+ * is discarded. A missing caption is a shrug; a wrong one burned into an export is a defect the
+ * viewer can see.
  */
-const MAX_SOUND_CAPTION_SECONDS = 5;
-
 async function captionSoundsTool(doc: EditorDocument, args: Args): Promise<ToolOut> {
   if (!(await taggingAvailable())) {
     return fail("The sound recognizer isn't installed with this build, so caption_sounds can't run.");
@@ -952,8 +955,11 @@ async function captionSoundsTool(doc: EditorDocument, args: Args): Promise<ToolO
     if (language) languages.add(language);
 
     // A sound heard through the whole recording characterises it and is not a moment in it.
-    const bedKeys = new Set(findBeds(windows, { minProb }).map((b) => b.key));
-    for (const b of findBeds(windows, { minProb })) beds.set(b.key, Math.max(beds.get(b.key) ?? 0, b.share));
+    const bedKeys = new Set<string>();
+    for (const b of findBeds(windows, { minProb })) {
+      bedKeys.add(b.key);
+      beds.set(b.key, Math.max(beds.get(b.key) ?? 0, b.share));
+    }
 
     const hits: WindowEvent[] = [];
     for (const w of windows) {

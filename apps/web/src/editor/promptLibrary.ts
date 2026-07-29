@@ -15,6 +15,7 @@ export const promptLibrary: PromptCategory[] = [
       "Rimuovi le pause e unisci in una clip",
       "Fai un primo montaggio pulito del girato",
       "Dividi il video in clip a ogni cambio di scena",
+      "Monta la conversazione cambiando camera su chi parla",
     ],
   },
   {
@@ -39,6 +40,7 @@ export const promptLibrary: PromptCategory[] = [
       "Musica di sottofondo [genere] duckata sotto la voce",
       "Voiceover che dice: [testo]",
       "Rimuovi il rumore di fondo",
+      "Metti ogni voce da dove sta la persona in scena",
     ],
   },
   {
@@ -47,6 +49,8 @@ export const promptLibrary: PromptCategory[] = [
       "Prepara versione 9:16 per TikTok",
       "Sottotitoli SRT da caricare su YouTube",
       "Esporta 3 short verticali con i momenti migliori",
+      "Sottotitoli accessibili: parlato e suoni (applausi, risate)",
+      "Scegli la copertina migliore del video",
     ],
   },
 ];
