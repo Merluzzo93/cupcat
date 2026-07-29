@@ -1150,6 +1150,13 @@ export const TOOL_DEFS: ToolDef[] = [
         minPauseSeconds: { type: "number", description: "A gap shorter than this is a breath and holds the shot (default 2.5)." },
         maxShotSeconds: { type: "number", description: "Cut away to the wide after this long on one angle. Off unless set — a monologue is otherwise one shot." },
         cutawaySeconds: { type: "number", description: "How long that cutaway lasts (default 2.5)." },
+        crosstalk: {
+          type: "string",
+          enum: ["wide", "split", "hold"],
+          description:
+            "What to do when two people talk over each other. 'wide' goes to the master shot (default when there is one); 'split' puts BOTH their cameras on screen together — the answer when there is no master shot and the alternative is cutting mid-word; 'hold' stays where it is (default without a wide).",
+        },
+        splitLayout: { type: "string", enum: ["side-by-side", "top-bottom"], description: "How a split screen is arranged. Defaults to the frame's shape: a vertical project stacks, a horizontal one goes side by side." },
         preview: { type: "boolean", description: "Return the plan and change nothing." },
       },
       ["angleClipIds"],

@@ -2022,12 +2022,14 @@ async function autoMulticamTool(ctx: BridgeContext, args: Args): Promise<ToolOut
       minPauseSeconds: numOpt(args.minPauseSeconds),
       maxShotSeconds: numOpt(args.maxShotSeconds),
       cutawaySeconds: numOpt(args.cutawaySeconds),
+      crosstalk: (["wide", "split", "hold"] as const).find((v) => v === strOpt(args.crosstalk)),
     },
   );
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
   const described = plan.segments.map((s) => ({
     angle: s.angle,
+    ...(s.alsoAngles ? { alsoAngles: s.alsoAngles, splitScreen: true } : {}),
     clipId: ids[s.angle],
     startSeconds: r2(s.startSeconds),
     endSeconds: r2(s.endSeconds),
@@ -2053,10 +2055,10 @@ async function autoMulticamTool(ctx: BridgeContext, args: Args): Promise<ToolOut
 
   // Deduplicated and window-clamped: two switches rounding onto one frame would ask multicam_cut to
   // split the same frame twice, and the second split fails.
-  const cuts = new Map<number, number>();
+  const cuts = new Map<number, number[]>();
   for (const s of plan.segments) {
     const f = Math.round(sourceToTimeline(s.startSeconds, win));
-    if (f >= winStart && f < winEnd) cuts.set(f, s.angle);
+    if (f >= winStart && f < winEnd) cuts.set(f, [s.angle, ...(s.alsoAngles ?? [])]);
   }
   if (cuts.size === 0) return fail("The plan produced no switch inside the angles' common window — nothing to cut.");
 
@@ -2065,6 +2067,7 @@ async function autoMulticamTool(ctx: BridgeContext, args: Args): Promise<ToolOut
     angleClipIds: ids,
     cuts: [...cuts.entries()].sort((a, b) => a[0] - b[0]),
     audioAngle,
+    splitLayout: (["side-by-side", "top-bottom"] as const).find((v) => v === strOpt(args.splitLayout)),
   });
   return okJson({
     ...shared,

@@ -223,6 +223,93 @@ describe("the whole plan", () => {
   });
 });
 
+describe("showing both when both are talking", () => {
+  test("crosstalk puts the two speakers' cameras on screen together", () => {
+    const plan = planCameras([turn("A", 0, 12), turn("B", 8, 20)], {
+      startSeconds: 0,
+      endSeconds: 20,
+      speakerAngles: TWO,
+      crosstalk: "split",
+    });
+    const split = plan.segments.find((s) => s.why === "crosstalk")!;
+    expect(split.angle).toBe(0);
+    expect(split.alsoAngles).toEqual([1]);
+  });
+
+  test("a split is bracketed by the single shots either side, not merged into them", () => {
+    const plan = planCameras([turn("A", 0, 12), turn("B", 8, 20)], {
+      startSeconds: 0,
+      endSeconds: 20,
+      speakerAngles: TWO,
+      crosstalk: "split",
+    });
+    expect(plan.segments.map((s) => [s.angle, s.alsoAngles ?? null])).toEqual([
+      [0, null],
+      [0, [1]],
+      [1, null],
+    ]);
+  });
+
+  test("two people on ONE camera have nothing to split, so the shot is held", () => {
+    const plan = planCameras([turn("A", 0, 12), turn("B", 8, 20)], {
+      startSeconds: 0,
+      endSeconds: 20,
+      speakerAngles: { A: 0, B: 0 },
+      crosstalk: "split",
+    });
+    expect(plan.segments.every((s) => s.alsoAngles === undefined)).toBe(true);
+  });
+
+  test("asking for a split does not lose the wide for silences", () => {
+    const plan = planCameras([turn("A", 0, 10), turn("A", 20, 30)], {
+      startSeconds: 0,
+      endSeconds: 30,
+      speakerAngles: TWO,
+      wideAngle: 2,
+      crosstalk: "split",
+    });
+    expect(plan.segments.map((s) => [s.angle, s.why])).toEqual([
+      [0, "speaker"],
+      [2, "silence"],
+      [0, "speaker"],
+    ]);
+  });
+
+  test("a split too short to hold is folded away like any other shot", () => {
+    const plan = planCameras([turn("A", 0, 10.3), turn("B", 10, 20)], {
+      startSeconds: 0,
+      endSeconds: 20,
+      speakerAngles: TWO,
+      crosstalk: "split",
+      minOverlapSeconds: 0.1, // let the 0.3s overlap through, so the minimum-shot rule is what acts
+      minShotSeconds: 1.5,
+    });
+    expect(plan.segments.every((s) => s.endSeconds - s.startSeconds >= 1.5)).toBe(true);
+  });
+
+  test("a split counts as screen time for both cameras", () => {
+    const plan = planCameras([turn("A", 0, 12), turn("B", 8, 20)], {
+      startSeconds: 0,
+      endSeconds: 20,
+      speakerAngles: TWO,
+      crosstalk: "split",
+    });
+    // 20 seconds of programme, but 24 seconds of camera time — the four shared seconds count twice.
+    expect(plan.perAngle.reduce((a, b) => a + b, 0)).toBeCloseTo(24, 6);
+  });
+
+  test("'hold' keeps the shot instead of cutting or splitting", () => {
+    const plan = planCameras([turn("A", 0, 12), turn("B", 8, 20)], {
+      startSeconds: 0,
+      endSeconds: 20,
+      speakerAngles: TWO,
+      wideAngle: 2,
+      crosstalk: "hold",
+    });
+    expect(plan.segments.map((s) => s.angle)).toEqual([0, 1]);
+  });
+});
+
 describe("breaking up a long take", () => {
   test("off by default — a monologue is one shot unless asked otherwise", () => {
     const plan = planCameras([turn("A", 0, 300)], { startSeconds: 0, endSeconds: 300, speakerAngles: TWO, wideAngle: 2 });

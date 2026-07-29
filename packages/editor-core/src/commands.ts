@@ -1785,7 +1785,7 @@ export function setMask(doc: EditorDocument, args: Args, source: EditSource = "a
 
 // ── apply_layout (predefined multi-clip arrangements) ─────────────────────────
 
-interface LayoutSlot {
+export interface LayoutSlot {
   centerX: number;
   centerY: number;
   width: number;
@@ -1797,7 +1797,7 @@ const grid = (cols: number, rows: number): LayoutSlot[] =>
     const row = Math.floor(i / cols);
     return { centerX: (col + 0.5) / cols, centerY: (row + 0.5) / rows, width: 1 / cols, height: 1 / rows };
   });
-const LAYOUT_SLOTS: Record<string, LayoutSlot[]> = {
+export const LAYOUT_SLOTS: Record<string, LayoutSlot[]> = {
   "side-by-side": [
     { centerX: 0.25, centerY: 0.5, width: 0.5, height: 1 },
     { centerX: 0.75, centerY: 0.5, width: 0.5, height: 1 },
