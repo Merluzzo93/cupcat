@@ -305,7 +305,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
   const callTool = async (name: string, args: Record<string, unknown>) => {
     setStatus(null);
     const result = await mcpCall(name, args);
-    showStatus(result.text || (result.isError ? "Error" : "Done"), result.isError);
+    showStatus(result.text || (result.isError ? t("common.error") : t("common.done")), result.isError);
   };
 
   const isVideo = clip.mediaType === "video";
@@ -816,7 +816,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
                       className="self-start rounded border border-neutral-800 bg-neutral-900 px-1.5 py-0.5 text-[9px] text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300 transition-colors"
                       title={t("insp.showCurve")}
                     >
-                      {curveOpen[prop] ? "▴ Curve" : "▾ Curve"}
+                      {curveOpen[prop] ? t("insp.curveHide") : t("insp.curveShow")}
                     </button>
                     {curveOpen[prop] && (
                       <KeyframeCurveEditor
@@ -1084,7 +1084,7 @@ function ClipInspector({ clip, asset, playhead, canGenerate, trackIndex, project
               }}
             />
           )}
-          <p className="text-[10px] text-neutral-600">Applied on export.</p>
+          <p className="text-[10px] text-neutral-600">{t("insp.onExport")}</p>
         </div>
       )}
 
@@ -1126,7 +1126,7 @@ function AssetInspector({ asset, playhead, canGenerate }: AssetInspectorProps) {
   const callTool = async (name: string, args: Record<string, unknown>) => {
     setStatus(null);
     const result = await mcpCall(name, args);
-    showStatus(result.text || (result.isError ? "Error" : "Done"), result.isError);
+    showStatus(result.text || (result.isError ? t("common.error") : t("common.done")), result.isError);
   };
 
   const isVideo = asset.type === "video";

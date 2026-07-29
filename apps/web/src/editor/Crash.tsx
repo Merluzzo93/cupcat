@@ -9,6 +9,7 @@
 // reach, because the whole difficulty the first time was having no idea what had failed.
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { t } from "./i18n";
 
 interface Props {
   children: ReactNode;
@@ -37,16 +38,13 @@ export class Crash extends Component<Props, State> {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-neutral-950 p-8 text-neutral-200">
         <div className="max-w-xl">
-          <h1 className="text-lg font-semibold">CupCat stopped drawing.</h1>
-          <p className="mt-2 text-sm text-neutral-400">
-            Something in the interface failed. Your project is on disk and untouched — reopening CupCat is safe, and if it
-            keeps happening the text below says what went wrong.
-          </p>
+          <h1 className="text-lg font-semibold">{t("crash.title")}</h1>
+          <p className="mt-2 text-sm text-neutral-400">{t("crash.body")}</p>
           <button
             onClick={() => window.location.reload()}
             className="mt-4 rounded bg-teal-500 px-3 py-1.5 text-sm font-medium text-teal-950 hover:bg-teal-400"
           >
-            Reload
+            {t("crash.reload")}
           </button>
           <pre className="mt-4 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-black/40 p-3 text-[11px] leading-relaxed text-neutral-400">
             {error.message}

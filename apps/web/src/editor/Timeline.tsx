@@ -566,7 +566,7 @@ export function Timeline() {
             <path d="M8.2 7.6 20 19M8.2 16.4 20 5" />
           </svg>
         </TbBtn>
-        <TbBtn title={snapping ? "Snapping on" : "Snapping off"} active={snapping} onClick={() => ui.setSnapping(!snapping)}>
+        <TbBtn title={snapping ? t("tl.snapOn") : t("tl.snapOff")} active={snapping} onClick={() => ui.setSnapping(!snapping)}>
           <svg {...iconProps} width={13} height={13}>
             <path d="M6 3v8a6 6 0 0 0 12 0V3" />
             <path d="M6 3h4M14 3h4" />
@@ -648,14 +648,14 @@ export function Timeline() {
                     <>
                       <TrackBtn
                         active={track.hidden}
-                        title={track.hidden ? "Show" : "Hide"}
+                        title={track.hidden ? t("tl.show") : t("tl.hide")}
                         onClick={() => setTrackProps(i, { hidden: !track.hidden })}
                       >
                         {track.hidden ? <IconEyeOff /> : <IconEye />}
                       </TrackBtn>
                       <TrackBtn
                         active={track.locked}
-                        title={track.locked ? "Unlock" : "Lock"}
+                        title={track.locked ? t("tl.unlockTrack") : t("tl.lockTrack")}
                         onClick={() => setTrackProps(i, { locked: !track.locked })}
                       >
                         {track.locked ? <IconLock /> : <IconUnlock />}
@@ -665,7 +665,7 @@ export function Timeline() {
                     <>
                       <TrackBtn
                         active={track.muted}
-                        title={track.muted ? "Unmute" : "Mute"}
+                        title={track.muted ? t("tl.unmute") : t("tl.mute")}
                         onClick={() => setTrackProps(i, { muted: !track.muted })}
                       >
                         M
@@ -675,7 +675,7 @@ export function Timeline() {
                       </TrackBtn>
                       <TrackBtn
                         active={track.locked}
-                        title={track.locked ? "Unlock" : "Lock"}
+                        title={track.locked ? t("tl.unlockTrack") : t("tl.lockTrack")}
                         onClick={() => setTrackProps(i, { locked: !track.locked })}
                       >
                         {track.locked ? <IconLock /> : <IconUnlock />}
@@ -874,7 +874,7 @@ export function Timeline() {
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1 rounded bg-neutral-800/70">
                             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
                             <span className="truncate text-[9px] font-medium text-amber-300">
-                              {genKind === "failed" ? "Failed" : "Generating…"}
+                              {genKind === "failed" ? t("common.failed") : t("media.generating")}
                             </span>
                           </div>
                         )}

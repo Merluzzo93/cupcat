@@ -202,13 +202,13 @@ export function CommandPalette() {
             </>
           )}
           {!hasQuery && results.length === 0 && (
-            <div className="px-4 py-3 text-sm text-neutral-500">No commands.</div>
+            <div className="px-4 py-3 text-sm text-neutral-500">{t("cmd.none")}</div>
           )}
         </div>
         <div className="flex items-center gap-3 border-t border-neutral-800 px-4 py-1.5 text-[10px] text-neutral-500">
-          <span>↑↓ navigate</span>
-          <span>↵ run</span>
-          <span>esc close</span>
+          <span>{t("cmd.navigate")}</span>
+          <span>{t("cmd.run")}</span>
+          <span>{t("cmd.close")}</span>
         </div>
       </div>
     </div>

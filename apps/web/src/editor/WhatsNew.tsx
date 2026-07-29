@@ -5,7 +5,7 @@
 // list of changes to a thing they have never used is noise. Skipping releases shows all of them.
 
 import { useEffect, useState } from "react";
-import { t } from "./i18n";
+import { getLang, t } from "./i18n";
 import { BRIDGE_HTTP } from "./store";
 
 const SEEN_KEY = "cupcat.seenVersion";
@@ -75,7 +75,7 @@ export function WhatsNew() {
           return;
         }
         if (seen === current) return;
-        const res = await fetch(`${BRIDGE_HTTP}/changelog?seen=${encodeURIComponent(seen)}`).then((r) => r.json());
+        const res = await fetch(`${BRIDGE_HTTP}/changelog?seen=${encodeURIComponent(seen)}&lang=${getLang()}`).then((r) => r.json());
         // Record it now, not on dismiss: a card the user closes by quitting must not come back
         // every launch until they click the button.
         localStorage.setItem(SEEN_KEY, current);

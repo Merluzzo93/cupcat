@@ -1765,7 +1765,7 @@ export function Preview() {
             ◁▏
           </button>
           <button
-            title={playing ? "Pause" : "Play"}
+            title={playing ? t("pv.pause") : t("pv.play")}
             onClick={() => {
               if (!playing) kickAudio(); // start audio inside the gesture (WebView2 autoplay rule)
               ui.setPlaying(!playing);

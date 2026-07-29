@@ -727,7 +727,7 @@ function LibraryToolbar({
         </button>
         <button
           onClick={onToggleGen}
-          title={genOpen ? "Hide the Generate panel" : "Generate media (Higgsfield)"}
+          title={genOpen ? t("media.genHide") : t("media.genShow")}
           className={`shrink-0 rounded p-1 transition-colors ${
             genOpen ? "bg-neutral-800 text-amber-300" : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
           }`}
@@ -762,7 +762,7 @@ function LibraryToolbar({
               disabled={busy}
               className="flex-1 rounded-md bg-neutral-800 py-1 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-40 transition-colors"
             >
-              {busy ? "Adding…" : "Choose files"}
+              {busy ? t("media.adding") : t("media.chooseFiles")}
             </button>
             <button
               onClick={() => folderRef.current?.click()}
@@ -793,7 +793,7 @@ function LibraryToolbar({
               e.currentTarget.value = "";
             }}
           />
-          <p className="text-[10px] text-neutral-600">or paste a file path / URL:</p>
+          <p className="text-[10px] text-neutral-600">{t("media.orPastePath")}</p>
           <input
             ref={inputRef}
             value={source}
@@ -808,9 +808,9 @@ function LibraryToolbar({
             disabled={busy || !source.trim()}
             className="w-full rounded-md bg-neutral-800 py-1 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-40 transition-colors"
           >
-            {busy ? "Adding…" : "Add"}
+            {busy ? t("media.adding") : t("media.add")}
           </button>
-          <p className="text-[10px] text-neutral-600">or download from the web (YouTube, Vimeo…):</p>
+          <p className="text-[10px] text-neutral-600">{t("media.orDownload")}</p>
           <div className="flex gap-1.5">
             <input
               value={videoUrl}
@@ -932,7 +932,7 @@ function MediaCard({
                 status === "failed" ? "text-red-400" : "text-neutral-300"
               }`}
             >
-              {status === "failed" ? "Failed" : "Generating…"}
+              {status === "failed" ? t("common.failed") : t("media.generating")}
             </span>
             {status !== "failed" && (
               <span className="relative block h-0.5 w-3/4 overflow-hidden rounded bg-neutral-700">
@@ -1409,7 +1409,7 @@ function GeneratePanel({
                       className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-neutral-600"
                     >
                       <option value="true">{t("common.yes")}</option>
-                      <option value="false">No</option>
+                      <option value="false">{t("common.no")}</option>
                     </select>
                   ) : (
                     <input

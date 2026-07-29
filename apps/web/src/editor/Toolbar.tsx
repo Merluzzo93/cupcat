@@ -173,7 +173,7 @@ export function Toolbar() {
       <button
         onClick={splitSelected}
         disabled={!canSplit}
-        title={canSplit ? "Split the selected clip at the playhead" : "Select a clip and move the playhead inside it to split"}
+        title={canSplit ? t("tb.splitHint") : t("tb.splitHintOff")}
         className="rounded px-2 py-1 text-xs hover:bg-neutral-800 disabled:opacity-40"
       >
         {t("toolbar.split")}
@@ -270,7 +270,7 @@ export function Toolbar() {
         <button
           type="button"
           onClick={() => ui.setMaximized("preview")}
-          title={maximized === "preview" ? "Restore layout" : "Maximize preview"}
+          title={maximized === "preview" ? t("tb.restoreLayout") : t("tb.maximizePreview")}
           className={`rounded px-2 py-1 text-xs transition ${
             maximized === "preview" ? "bg-neutral-600 text-neutral-100" : "text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
           }`}
@@ -583,7 +583,7 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
           disabled={busy}
           className="w-full rounded-md bg-neutral-200 px-3 py-2 font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
         >
-          {busy ? "Exporting…" : "Export"}
+          {busy ? t("tb.exporting") : t("toolbar.export")}
         </button>
         {busy && (
           <button
@@ -624,7 +624,7 @@ function ExportDialog({ fps, onClose }: { fps: number; onClose: () => void }) {
                       {p.label} ↗
                     </a>
                   ))}
-                  <span className="text-neutral-600">— download first, then drag the file into the upload page</span>
+                  <span className="text-neutral-600">{t("tb.downloadFirst")}</span>
                 </div>
               </>
             ) : (
@@ -1110,7 +1110,7 @@ function BeatSyncDialog({ onClose }: { onClose: () => void }) {
         <label className="flex flex-col gap-1">
           <span className="text-neutral-400">{t("beat.music")}</span>
           <select value={media} onChange={(e) => pickMedia(e.target.value)} className={inputCls} disabled={busy}>
-            {audios.length === 0 && <option value="">(no audio in the library)</option>}
+            {audios.length === 0 && <option value="">{t("tb.noAudio")}</option>}
             {audios.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -1123,8 +1123,8 @@ function BeatSyncDialog({ onClose }: { onClose: () => void }) {
             <span className="text-neutral-400">{t("tb.cutEvery")}</span>
             <select value={beatEvery} onChange={(e) => setBeatEvery(Number(e.target.value))} className={inputCls} disabled={busy}>
               <option value={1}>{t("beat.every")}</option>
-              <option value={2}>Every 2 beats</option>
-              <option value={4}>Every 4 beats (bar)</option>
+              <option value={2}>{t("tb.every2Beats")}</option>
+              <option value={4}>{t("tb.every4Beats")}</option>
             </select>
           </label>
           <label className="flex flex-col gap-1">
@@ -1174,12 +1174,12 @@ function BeatSyncDialog({ onClose }: { onClose: () => void }) {
             disabled={busy || !media}
             className="rounded border border-neutral-700 px-4 py-1.5 font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
           >
-            {busy ? "Working…" : "Detect"}
+            {busy ? t("tb.working") : t("tb.detect")}
           </button>
           <button
             onClick={() => void sync()}
             disabled={busy || !media || lowConfidence}
-            title={lowConfidence ? "Beat confidence is too low to sync — pick another track" : "Trim the video track so cuts land on the beats"}
+            title={lowConfidence ? t("tb.beatLow") : t("tb.beatTrim")}
             className="rounded bg-violet-600 px-4 py-1.5 font-medium text-white hover:bg-violet-500 disabled:opacity-40"
           >
             Sync cuts
@@ -1200,10 +1200,10 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
       <div className="max-h-[70vh] space-y-1 overflow-y-auto text-xs text-neutral-300">
         <span className={h}>{t("help.gettingStarted")}</span>
         <ol className="list-decimal space-y-1 pl-4">
-          <li>Drop video/audio/image files into the Library (left) — or just copy them into the project folder.</li>
-          <li>Drag media onto the timeline. Click the ruler to move the playhead; Space plays/pauses.</li>
-          <li>The fastest way to edit: ask the assistant in the chat panel — "remove the pauses", "make 3 vertical clips", "cut to the music beat".</li>
-          <li>Export (top right) renders the timeline; files land in the project's <span className="font-mono">exports/</span> folder.</li>
+          <li>{t("tb.helpImport")}</li>
+          <li>{t("tb.helpTimeline")}</li>
+          <li>{t("tb.helpAssistant")}</li>
+          <li>{t("tb.helpExport")} <span className="font-mono">exports/</span> {t("tb.helpExportFolder")}</li>
         </ol>
         <span className={h}>{t("help.shortcuts")}</span>
         {/* Editable: click a key chip, press the new combo. Backed by the action registry. */}
@@ -1211,7 +1211,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
         <ul className="space-y-0.5 pl-1 pt-1">
           <li><span className="font-mono text-neutral-200">{t("tb.clickRuler")}</span> — seek · <span className="font-mono text-neutral-200">drag clip edges</span> — trim (<span className="font-mono">{t("tb.shift")}</span> = ripple)</li>
           <li><span className="font-mono text-neutral-200">{t("tb.dblClickPreview")}</span> — select that clip</li>
-          <li>Markers: right-click a marker flag to edit its note or delete it</li>
+          <li>{t("tb.helpMarkers")}</li>
         </ul>
         <span className={h}>{t("help.glossary")}</span>
         <ul className="space-y-0.5 pl-1">
@@ -1223,7 +1223,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
           <li><b>{t("tb.timecode")}</b> — shown as min:sec:<i>frame</i> (the last number is frames, not hundredths).</li>
         </ul>
         <span className={h}>{t("help.connectAgent")}</span>
-        <p>CupCat runs a local MCP server — Claude Code, Cursor or Claude Desktop can edit this project with full context:</p>
+        <p>{t("tb.helpMcp")}</p>
         <code className="block break-all rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 font-mono text-[11px] text-neutral-200">{cmd}</code>
         <p className="text-[11px] text-neutral-500">
           Other clients: add an HTTP MCP server pointing at <span className="font-mono">{BRIDGE_HTTP}/mcp</span>.
@@ -1345,7 +1345,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
               </>
             )}
             <button onClick={copyPath} className="w-full rounded-md bg-neutral-200 px-3 py-2 font-medium text-neutral-900 hover:bg-white">
-              {copied ? "Copiato ✓" : "Copia percorso"}
+              {copied ? t("tb.copied") : t("tb.copyPath")}
             </button>
             {error && <div className="rounded border border-red-900 bg-red-950/40 p-2 text-red-300">{error}</div>}
           </>
@@ -1381,7 +1381,7 @@ function ConnectionsDialog({ onClose }: { onClose: () => void }) {
           <span className={`h-2 w-2 rounded-full ${ok ? "bg-emerald-400" : "bg-red-400"}`} />
           {name}
         </span>
-        <span className={ok ? "text-emerald-400" : "text-red-400"}>{ok ? "Connected" : "Not connected"}</span>
+        <span className={ok ? "text-emerald-400" : "text-red-400"}>{ok ? t("tb.connected") : t("tb.notConnected")}</span>
       </div>
       <p className="mt-1 text-[11px] text-neutral-500">{detail}</p>
       {children && <div className="mt-2 flex gap-2">{children}</div>}
@@ -1537,7 +1537,7 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
     <Modal title={t("tb.projectsHint")} onClose={onClose}>
       <div className="space-y-3 text-xs">
         <div className="max-h-60 space-y-1 overflow-y-auto">
-          {projects.length === 0 && <p className="text-neutral-500">No projects yet.</p>}
+          {projects.length === 0 && <p className="text-neutral-500">{t("tb.noProjects")}</p>}
           {projects.map((p) => (
             <div
               key={p.path}

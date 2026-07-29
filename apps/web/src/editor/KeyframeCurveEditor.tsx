@@ -270,7 +270,7 @@ export function KeyframeCurveEditor({
   };
 
   if (!track || track.keyframes.length === 0) {
-    return <div className="px-1 py-2 text-[9px] text-neutral-600">No keyframes yet — add one with ◆ above, then shape its curve here.</div>;
+    return <div className="px-1 py-2 text-[9px] text-neutral-600">{t("kf.none")}</div>;
   }
 
   const dimChan: Chan = chan === "a" ? "b" : "a";

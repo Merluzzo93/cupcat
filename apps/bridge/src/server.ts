@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { availableChatModels, type ChatRequest, defaultChatModel, getClaudeStatus, requestChatStop, runChat, setApiKey } from "./agent-chat";
 import { deleteChat, getChats, newChat, saveActiveChat, saveChat, selectChat } from "./chats";
 import { BRIDGE_PORT, CUPCAT_VERSION, exportsDir, webDir } from "./config";
-import { entriesBetween } from "./changelog";
+import { entriesBetween, localise } from "./changelog";
 import { loadDiarization } from "./diarize";
 import { ensureCompoundBake } from "./export";
 import { type BridgeContext, executeTool, importFolderMedia } from "./executor";
@@ -706,7 +706,11 @@ function serve(
 
       if (path === "/changelog") {
         const seen = url.searchParams.get("seen") ?? "";
-        return Response.json({ current: CUPCAT_VERSION, entries: seen ? entriesBetween(seen, CUPCAT_VERSION) : [] }, { headers: cors });
+        // The card is read in whatever language the app is set to; the English text is what the
+        // release notes carry. An entry with no translation falls back rather than vanishing.
+        const lang = url.searchParams.get("lang") ?? "en";
+        const entries = seen ? entriesBetween(seen, CUPCAT_VERSION).map((e) => localise(e, lang)) : [];
+        return Response.json({ current: CUPCAT_VERSION, entries }, { headers: cors });
       }
 
       if (path === "/speakers") {

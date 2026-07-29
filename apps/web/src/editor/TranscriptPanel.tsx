@@ -321,13 +321,13 @@ export function TranscriptPanel() {
   // ── body variants ───────────────────────────────────────────────────────────
   let body: ReactNode;
   if (!project) {
-    body = <p className="px-2 pt-10 text-center text-[11px] text-neutral-500">Open a project to see its transcript.</p>;
+    body = <p className="px-2 pt-10 text-center text-[11px] text-neutral-500">{t("tr.openProject")}</p>;
   } else if (words === null && loading) {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-neutral-200" />
         <p className="text-[11px] text-neutral-400">{t("tr.transcribing")}</p>
-        <p className="text-[10px] leading-4 text-neutral-600">Speech recognition runs on your machine — the first pass over long footage can take a few minutes.</p>
+        <p className="text-[10px] leading-4 text-neutral-600">{t("tr.onDeviceSlow")}</p>
       </div>
     );
   } else if (words === null && error) {
@@ -361,7 +361,7 @@ export function TranscriptPanel() {
         >
           Load transcript
         </button>
-        <p className="text-[10px] text-neutral-600">The first load can take a while — it listens to your footage on-device.</p>
+        <p className="text-[10px] text-neutral-600">{t("tr.firstLoad")}</p>
       </div>
     );
   } else if (words.length === 0) {
@@ -482,7 +482,7 @@ export function TranscriptPanel() {
                   ? "Cutting…"
                   : `Delete selection — ${selCut.wordCount} word${selCut.wordCount === 1 ? "" : "s"} · ${fmtSeconds(selCut.durationFrames, fps)}`}
               </button>
-              <span className="text-center text-[10px] text-neutral-500">…or press Delete. The video closes the gap automatically.</span>
+              <span className="text-center text-[10px] text-neutral-500">{t("tr.orPressDelete")}</span>
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">

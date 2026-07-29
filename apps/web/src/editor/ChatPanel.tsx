@@ -513,7 +513,7 @@ export function ChatPanel() {
                   className={`flex h-7 w-7 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500 ${
                     chatBusy ? "bg-red-500/90 text-white hover:bg-red-400" : "bg-neutral-200 text-neutral-900 hover:bg-white"
                   }`}
-                  title={chatBusy ? "Ferma l'assistente (le modifiche già fatte restano)" : "Send"}
+                  title={chatBusy ? "Ferma l'assistente (le modifiche già fatte restano)" : t("chat.send")}
                 >
                   {chatBusy ? <span className="text-xs">■</span> : <span className="text-sm leading-none">↑</span>}
                 </button>
