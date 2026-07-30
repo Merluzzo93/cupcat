@@ -6,8 +6,10 @@ description = "Local face detection sidecar for CupCat (YuNet on ONNX Runtime)"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-# load-dynamic: the runtime is resolved at start from ORT_DYLIB_PATH, so this binds to the
-# onnxruntime.dll CupCat ALREADY ships for speech diarization and stem separation — no second copy.
+# load-dynamic: the runtime is resolved at start from ORT_DYLIB_PATH, which main.rs points at
+# sidecars/faces/onnxruntime.dll. Without the variable ort falls back to the bare name, which Windows
+# answers with its own System32 copy — a different library that fails with "OrtGetApiBase must be
+# present". Hence the copy beside the exe, and the test that enforces one per sidecar folder.
 ort = { version = "=2.0.0-rc.10", features = ["load-dynamic"], default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 

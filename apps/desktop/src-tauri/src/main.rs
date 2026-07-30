@@ -59,10 +59,13 @@ fn build_sidecar(app: &tauri::AppHandle) -> Result<tauri_plugin_shell::process::
             p("tagging/sherpa-onnx-offline-audio-tagging.exe"),
         )
         .env("CUPCAT_TAGGING_DIR", p("tagging"))
-        // Local face detection (YuNet on ONNX Runtime), linked against diarization's onnxruntime.
+        // Local face detection (YuNet on ONNX Runtime). The runtime it loads is the copy in its OWN
+        // folder, not diarization's: sidecars/faces has shipped one since 1.8.0, because a sidecar
+        // that has to reach into a sibling folder for its runtime is one deletion away from silently
+        // falling back to whatever onnxruntime.dll Windows happens to have (see sidecars.test.ts).
         .env("CUPCAT_FACES_BIN", p("faces/cupcat-faces.exe"))
         .env("CUPCAT_FACES_MODEL", p("faces/yunet.onnx"))
-        .env("ORT_DYLIB_PATH", p("diarize/onnxruntime.dll"))
+        .env("ORT_DYLIB_PATH", p("faces/onnxruntime.dll"))
         .env("CUPCAT_VERSION", app.package_info().version.to_string()))
 }
 
