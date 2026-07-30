@@ -9,7 +9,10 @@
 // everything else keeps pointing at the release it last changed in, so someone three versions behind
 // still gets a complete update without any release having to carry 1.5 GB of unchanged tools.
 //
-//   bun run apps/desktop/tools/manifest.ts <version> [--tag <releaseTag>]
+//   bun run apps/desktop/tools/manifest.ts <version> [--tag <releaseTag>] [--installer <path>]
+//
+// `--installer` points at an installer other than the one tauri just wrote. Code signing rewrites the
+// installer and the executables inside it, so the SIGNED file is the one the manifest must describe.
 //
 // `since` names the release TAG carrying a file's content, which is usually this version's own tag.
 // Pass --tag to publish a small fix into a release that already exists: the version moves, the tag
@@ -68,7 +71,7 @@ function walk(root: string, dir = root, out: string[] = []): string[] {
 }
 
 /**
- * The app binary AS THE INSTALLER SHIPS IT, pulled back out of the installer.
+ * The executables AS THE INSTALLER SHIPS THEM, pulled back out of the installer.
  *
  * Not target/release/cupcat.exe, which is a different file: tauri stamps the binary as part of
  * bundling, and what makensis packed is not what is sitting there afterwards. Hashing the wrong one
@@ -76,19 +79,33 @@ function walk(root: string, dir = root, out: string[] = []): string[] {
  * the installer shipped c62389… while the manifest and the published spare part both claimed
  * 8271f3…. The manifest is a promise about what is installed, so it has to be taken from the thing
  * that installs it.
+ *
+ * The engine is read from the installer too, for a second reason that arrives with code signing: a
+ * signature rewrites the PE it is applied to. If the signing step signs the executables inside the
+ * installer — which is the point of signing, rather than only wrapping the outer file — then the
+ * staged copy in binaries/ is no longer the file anyone will have on disk.
  */
-function appBinaryFromInstaller(version: string): string {
-  const setup = join(tauri, "target", "release", "bundle", "nsis", `CupCat_${version}_x64-setup.exe`);
+function exesFromInstaller(setup: string): { app: string; bridge: string } {
   if (!existsSync(setup)) throw new Error(`installer not found at ${setup} — run tauri build first`);
   const out = join(tauri, "target", "release", "from-installer");
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const sevenZip = "C:/Program Files/7-Zip/7z.exe";
   if (!existsSync(sevenZip)) throw new Error(`7-Zip is needed to read the installer (${sevenZip})`);
-  const r = Bun.spawnSync([sevenZip, "e", "-y", `-o${out}`, setup, "cupcat.exe"]);
+  const r = Bun.spawnSync([sevenZip, "e", "-y", `-o${out}`, setup, "cupcat.exe", "cupcat-bridge.exe"]);
   const app = join(out, "cupcat.exe");
-  if (r.exitCode !== 0 || !existsSync(app)) throw new Error(`could not read cupcat.exe out of ${setup}`);
-  return app;
+  const bridge = join(out, "cupcat-bridge.exe");
+  if (r.exitCode !== 0 || !existsSync(app) || !existsSync(bridge)) {
+    throw new Error(`could not read cupcat.exe and cupcat-bridge.exe out of ${setup}`);
+  }
+  return { app, bridge };
+}
+
+/** Which installer to describe. Signing produces a different file, and that is the one that ships. */
+function installerPath(version: string): string {
+  const override = arg("--installer");
+  if (override) return resolve(override);
+  return join(tauri, "target", "release", "bundle", "nsis", `CupCat_${version}_x64-setup.exe`);
 }
 
 /**
@@ -99,11 +116,8 @@ function appBinaryFromInstaller(version: string): string {
  */
 function packagedFiles(version: string): Map<string, string> {
   const out = new Map<string, string>();
-  const app = appBinaryFromInstaller(version);
+  const { app, bridge } = exesFromInstaller(installerPath(version));
   out.set("cupcat.exe", app);
-
-  const bridge = join(tauri, "binaries", "cupcat-bridge-x86_64-pc-windows-msvc.exe");
-  if (!existsSync(bridge)) throw new Error(`the engine is not staged at ${bridge}`);
   out.set("cupcat-bridge.exe", bridge);
 
   const sidecars = join(tauri, "sidecars");
@@ -141,7 +155,9 @@ async function previousManifest(): Promise<Manifest | null> {
 
 const version = process.argv[2];
 if (!version || version.startsWith("-")) {
-  console.error("usage: bun run apps/desktop/tools/manifest.ts <version> [--from-install <dir> --from-version <v>]");
+  console.error(
+    "usage: bun run apps/desktop/tools/manifest.ts <version> [--tag <releaseTag>] [--installer <path>] [--from-install <dir> --from-version <v>]",
+  );
   process.exit(1);
 }
 

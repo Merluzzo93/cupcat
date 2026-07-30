@@ -121,6 +121,10 @@ No preinstalls, no Python, no credits. CupCat checks for new versions on launch 
 To use the in-app assistant or MCP, sign in to **Claude Code** on the same machine. To generate
 media, sign in to **Higgsfield** (`higgsfield auth login`).
 
+Windows will warn you when you run the installer: it is not code-signed yet. You can check the file's
+SHA-256 against the value on the release page. How the installer is built, and where signing stands, is
+written down in the [code signing policy](https://cupcat.meetaly.agency/signing.html).
+
 ## How it works
 
 ```
@@ -158,13 +162,20 @@ bun run bridge
 ```
 
 The bundled AI engines (ffmpeg, Whisper/GGML models, Piper voices, sherpa-onnx models) live under
-`apps/desktop/src-tauri/sidecars/` and are **git-ignored** because of their size — the shipped
-installer already contains them. To produce the installer:
+`apps/desktop/src-tauri/sidecars/` and are **git-ignored** because of their size — 1.3 GB. One command
+fetches all 403 of them from pinned upstream sources, verifies each download against a recorded
+SHA-256, and checks the assembled folder against a lock file:
 
 ```bash
+bun run sidecars                # → apps/desktop/src-tauri/sidecars/
+bun run sidecars:check          # verify an existing folder without downloading
+
 cd apps/desktop/src-tauri
 bunx @tauri-apps/cli build      # → target/release/bundle/nsis/CupCat_<version>_x64-setup.exe
 ```
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) on GitHub-hosted
+runners, which is what makes them signable — see [docs/SIGNING.md](docs/SIGNING.md).
 
 ## Roadmap
 

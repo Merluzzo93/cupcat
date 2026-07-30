@@ -148,29 +148,82 @@ jobs:
           echo "version=$(basename "$exe" | sed -E 's/^CupCat_(.+)_x64-setup\.exe$/\1/')" >> "$GITHUB_OUTPUT"
           ls -la "$exe"
 
+      # ── signing ──────────────────────────────────────────────────────────────
+      # SignPath takes a GitHub Actions artifact, not a file path, so the installer is uploaded first.
+      # Nothing below runs until SIGNPATH_API_TOKEN and the three SignPath vars exist, so the workflow
+      # keeps producing a usable unsigned installer in the meantime rather than failing.
+      - name: Upload the installer for signing
+        if: env.DO_INSTALLER == 'true'
+        id: built
+        uses: actions/upload-artifact@v7
+        with:
+          name: CupCat-${{ steps.found.outputs.version }}-build
+          path: ${{ steps.found.outputs.exe }}
+          retention-days: 7
+          # SignPath receives the zip and unpacks it; compressing 1.5 GB twice buys nothing.
+          compression-level: 0
+
+      # Every request waits for a human to approve it in SignPath — that is one of the Foundation's
+      # conditions, and it is also what we want: a release is a decision.
+      - name: Sign the installer
+        id: sign
+        if: env.DO_INSTALLER == 'true' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.built.outputs.artifact-id }}
+          wait-for-completion: true
+          # Approval is manual, so allow for a person being asleep.
+          wait-for-completion-timeout-in-seconds: 21600
+          # Signed installer comes back here, and it is the one everything downstream must use.
+          output-artifact-directory: signed
+
+      # THE ORDER HERE IS THE WHOLE POINT. Signing rewrites cupcat.exe, cupcat-bridge.exe and the
+      # installer itself, and the delta updater's manifest is a list of SHA-256s of those exact bytes.
+      # A manifest made before signing describes files no signed installation contains, which is the
+      # failure that has already cost this project five bad releases.
+      - name: Choose the installer everything downstream uses
+        if: env.DO_INSTALLER == 'true'
+        id: final
+        shell: bash
+        run: |
+          if [ -f "signed/$(basename '${{ steps.found.outputs.exe }}')" ]; then
+            echo "exe=signed/$(basename '${{ steps.found.outputs.exe }}')" >> "$GITHUB_OUTPUT"
+            echo "signed=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "exe=${{ steps.found.outputs.exe }}" >> "$GITHUB_OUTPUT"
+            echo "signed=no" >> "$GITHUB_OUTPUT"
+            echo "::warning::Not signed — SignPath is not configured. The installer is usable but Windows will warn about it."
+          fi
+
       # The manifest the in-app updater reads. It has to come from the installer, not from
       # target/release: tauri stamps cupcat.exe while bundling, so the two differ and publishing the
       # wrong one puts a checksum in the manifest that no installed copy can ever match.
       - name: Manifest, from the installer itself
         if: env.DO_INSTALLER == 'true'
-        run: bun run apps/desktop/tools/manifest.ts ${{ steps.found.outputs.version }}
+        run: bun run apps/desktop/tools/manifest.ts ${{ steps.found.outputs.version }} --installer ${{ steps.final.outputs.exe }}
 
       - name: Check the manifest against the installer
         if: env.DO_INSTALLER == 'true'
         shell: bash
         run: |
-          7z x -y -o"$RUNNER_TEMP/payload" "${{ steps.found.outputs.exe }}" > /dev/null
+          7z x -y -o"$RUNNER_TEMP/payload" "${{ steps.final.outputs.exe }}" > /dev/null
           rm -rf "$RUNNER_TEMP/payload/\$PLUGINSDIR"
           bun run apps/desktop/tools/check-manifest.ts \
             "apps/desktop/manifests/${{ steps.found.outputs.version }}.json" "$RUNNER_TEMP/payload"
 
-      - name: Upload the installer
+      - name: Upload what a release would publish
         if: env.DO_INSTALLER == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: CupCat-${{ steps.found.outputs.version }}-unsigned
+          name: CupCat-${{ steps.found.outputs.version }}-${{ steps.final.outputs.signed == 'yes' && 'signed' || 'unsigned' }}
           path: |
-            ${{ steps.found.outputs.exe }}
+            ${{ steps.final.outputs.exe }}
             apps/desktop/manifests/${{ steps.found.outputs.version }}.json
+            apps/desktop/src-tauri/target/release/delta
           retention-days: 7
           compression-level: 0

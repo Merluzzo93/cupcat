@@ -40,10 +40,14 @@ bun run apps/desktop/tools/manifest.ts <version>          # AFTER the build: rea
 bun run apps/desktop/tools/check-manifest.ts apps/desktop/manifests/<v>.json <dir>   # must be 0/0/0
 ```
 
-The manifest must be generated **after** `tauri build` and takes `cupcat.exe` **out of the installer**
-— tauri stamps the binary while bundling, so `target/release/cupcat.exe` is a different file from the
-one that gets installed. Publishing the wrong one puts a checksum in the manifest that no installed
-copy can match.
+The manifest must be generated **after** `tauri build` and takes both executables **out of the
+installer** — tauri stamps the binary while bundling, so `target/release/cupcat.exe` is a different
+file from the one that gets installed. Publishing the wrong one puts a checksum in the manifest that no
+installed copy can match. Once signing is live it must also come **after** signing, which rewrites
+those same bytes: `manifest.ts <version> --installer <signed installer>`.
+
+Releases are meant to be built by `.github/workflows/release.yml` on GitHub-hosted runners — not
+because CI is tidier, but because SignPath refuses to sign anything else. See `docs/SIGNING.md`.
 
 Then `gh release create v<version>` with the installer, `manifest.json` and the `file__*` assets, and
 update the version on the site. A small fix can instead go **into the existing release**
