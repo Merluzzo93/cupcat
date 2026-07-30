@@ -42,7 +42,7 @@ jobs:
       DO_INSTALLER: ${{ inputs.stage == 'installer' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Inputs, the extracted engines, the Rust target dir and a 1.5 GB installer add up. If a run
       # ever dies with a confusing error, look here first — out of disk does not announce itself.
@@ -67,7 +67,7 @@ jobs:
 
       # Keyed on the pinned sources, so editing sources.ts correctly invalidates it.
       - name: Cache bundled engine downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .sidecar-cache
           key: sidecars-${{ hashFiles('tools/sidecars/sources.ts') }}
@@ -153,7 +153,7 @@ jobs:
 
       - name: Upload the installer
         if: env.DO_INSTALLER == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CupCat-${{ steps.found.outputs.version }}-unsigned
           path: |
