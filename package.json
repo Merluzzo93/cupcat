@@ -17,7 +17,10 @@
     "web": "bun run build:core && bun --filter @cupcat/web dev",
     "bridge": "bun run build:core && bun --filter @cupcat/bridge dev",
     "upstream": "bun run tools/upstream/check.ts",
-    "typecheck": "bun run build:core && bun --filter @cupcat/editor-core typecheck && bun --filter @cupcat/bridge typecheck && bun --filter @cupcat/web typecheck"
+  "sidecars": "bun run tools/sidecars/fetch.ts",
+  "sidecars:check": "bun run tools/sidecars/fetch.ts --check",
+    "typecheck:tools": "bun --filter @cupcat/bridge typecheck:tools",
+  "typecheck": "bun run build:core && bun --filter @cupcat/editor-core typecheck && bun --filter @cupcat/bridge typecheck && bun --filter @cupcat/web typecheck && bun run typecheck:tools"
   },
   "engines": {
     "node": ">=20.19"

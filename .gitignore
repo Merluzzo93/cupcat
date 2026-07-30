@@ -46,3 +46,7 @@ STRATEGIA-2026.md
 
 # Scratch scripts used to drive the engine against real footage while verifying a feature.
 **/verify-scratch/
+
+# Downloads for tools/sidecars/fetch.ts. 1.2 GB of upstream engines and models, pinned by
+# sha256 in tools/sidecars/sources.ts, so re-fetching is safe and caching is just kindness.
+/.sidecar-cache/

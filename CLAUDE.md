@@ -30,7 +30,8 @@ rebuilding one.
 ## Building and releasing
 
 ```
-bun run typecheck && bun test          # 535 tests; all must pass
+bun run sidecars                       # 402 bundled engine files, pinned + hash-verified
+bun run typecheck && bun test          # 716 tests; all must pass
 bun run build:web && bun run build:bridge
 cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
 cd apps/desktop && npx @tauri-apps/cli@latest build      # needs cargo AND node on PATH

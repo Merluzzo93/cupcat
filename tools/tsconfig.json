@@ -1,0 +1,20 @@
+{
+  // The release tooling was not typechecked by anything until 1.8.1 — which is backwards, because a
+  // silent break here does not show up as a failing test, it shows up as a broken release. Covers
+  // both tools/ and the desktop build scripts (manifest.ts is what the in-app updater reads).
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023"],
+    // bun-types lives in the bridge workspace; there is no root node_modules to hoist it into.
+    "types": ["bun-types"],
+    "typeRoots": ["../apps/bridge/node_modules"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["**/*.ts", "../apps/desktop/tools/**/*.ts"]
+}

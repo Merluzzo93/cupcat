@@ -43,6 +43,15 @@ export const SOURCES: Source[] = [
     probe: { bin: "ffmpeg.exe", args: ["-version"], extract: /ffmpeg version (\S+)/ },
   }),
   S({
+    id: "higgsfield-cli",
+    repo: "higgsfield-ai/cli",
+    kind: "bundled",
+    role: "Every generated image, video and voice: generate_media and the Higgsfield tools go through this CLI.",
+    watchFor:
+      "It talks to a remote service, so like yt-dlp it rots rather than merely ages — and it went unwatched for a long time. CupCat pins 0.1.33 (May 2026) while upstream is on 1.x, which is a decision waiting to be taken, not a number to bump blindly: a major line means the command surface can have changed under generate_media.",
+    probe: { bin: "higgsfield.exe", args: ["--version"], extract: /higgsfield (\S+)/ },
+  }),
+  S({
     id: "yt-dlp",
     repo: "yt-dlp/yt-dlp",
     kind: "bundled",

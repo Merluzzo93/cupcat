@@ -58,52 +58,49 @@ CUPCAT_FFMPEG_BIN=apps/desktop/src-tauri/sidecars/ffmpeg.exe CUPCAT_FFPROBE_BIN=
 
 `tauri build` bundles everything in `src-tauri/sidecars/` (gitignored) into the installer, and
 `main.rs` points the bridge at them via env, so the installed app needs nothing preinstalled.
-Populate that folder before building:
+
+**One command populates the folder.** 402 downloaded files, each source pinned to an exact version and
+verified by SHA-256, and the assembled tree checked against `tools/sidecars/sidecars.lock.json`:
 
 ```sh
-mkdir -p apps/desktop/src-tauri/sidecars
-
-# ffmpeg/ffprobe — the REAL binaries (not the chocolatey shims)
-cp "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin/ffmpeg.exe"  apps/desktop/src-tauri/sidecars/
-cp "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin/ffprobe.exe" apps/desktop/src-tauri/sidecars/
-
-# Higgsfield CLI → standalone exe (no Node needed)
-bun build --compile node_modules/@higgsfield/cli/bin/higgsfield.js \
-  --outfile apps/desktop/src-tauri/sidecars/higgsfield.exe
-
-# whisper.cpp (whisper-cli.exe + ggml*.dll) — from github.com/ggml-org/whisper.cpp/releases (whisper-bin-x64.zip)
-# + model ggml-base.bin — from huggingface.co/ggerganov/whisper.cpp
-# unzip the Release/ DLLs + whisper-cli.exe and the model into src-tauri/sidecars/
-
-# speaker diarization (sidecars/diarize) — sherpa-onnx CLI + DLLs + TWO .onnx models:
-#   sherpa-onnx-pyannote-segmentation-3-0.onnx            (who-speaks-when boundaries)
-#   3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx   (which voice is which)
-# Both from github.com/k2-fsa/sherpa-onnx/releases (speaker-recongition-models).
-# The embedding model MUST NOT be a Mandarin-only one (…_sv_zh-cn_…): CupCat shipped that until
-# 1.7.13 and it merged two clearly different English speakers into a single "S1".
-#
-# ⚠️ After REPLACING a sidecar file, delete the stale copy from the staging directory as well —
-# `tauri build` copies resources in but never removes ones that have gone from the source, so the
-# old file rides along in the installer:
-#   rm target/release/sidecars/<the file you replaced>
-
-# sound recognition (sidecars/tagging) — sherpa-onnx-offline-audio-tagging.exe + its onnxruntime
-# DLLs (from the win-x64-shared-MD-MinSizeRel-no-tts build), plus the CED-tiny AudioSet model
-# renamed to ced-tiny.int8.onnx and its class_labels_indices.csv, from the
-# github.com/k2-fsa/sherpa-onnx audio-tagging-models release. ~19 MB in total.
-# The label file is NOT optional: caption_sounds maps its display names to the words it writes.
-
-# face detection (apps/faces) — our own Rust sidecar, built from source
-cargo build --release --manifest-path apps/faces/Cargo.toml
-mkdir -p apps/desktop/src-tauri/sidecars/faces
-cp apps/faces/target/release/cupcat-faces.exe apps/desktop/src-tauri/sidecars/faces/
-# + the YuNet model (MIT, ~230 KB) from github.com/opencv/opencv_zoo
-#   → face_detection_yunet_2023mar.onnx, renamed to sidecars/faces/yunet.onnx
+bun run sidecars            # ~1.3 GB, cached in .sidecar-cache/ so a re-run costs nothing
+bun run sidecars:check      # verify an existing folder without downloading
 ```
 
-The faces sidecar links against the ONNX Runtime that diarization already ships
-(`ORT_DYLIB_PATH` → `sidecars/diarize/onnxruntime.dll`), so it adds no second runtime — build it
-after `diarize/` is populated.
+It exists because a folder that only one laptop knows how to build cannot be built by CI — and CI is
+not optional: SignPath signs artifacts produced by a GitHub-hosted workflow and nothing else. The
+pinning is not ceremony either. Writing it caught two things a hand-built folder hides: OpenCV Zoo
+serves YuNet through Git LFS, so `raw.githubusercontent.com` hands you a 131-byte pointer file with a
+cheerful HTTP 200; and the shipped folder had silently lost `espeak-ng-data/voices/!v/Mr serious`
+somewhere along the way.
+
+One file is BUILT rather than downloaded, and the lock deliberately ignores it:
+
+```sh
+# face detection — our own Rust sidecar
+cargo build --release --manifest-path apps/faces/Cargo.toml
+cp apps/faces/target/release/cupcat-faces.exe apps/desktop/src-tauri/sidecars/faces/
+```
+
+`higgsfield.exe` used to be built here too, with `bun build --compile` over the `@higgsfield/cli` npm
+package. That package is only a launcher — its postinstall downloads the real binary — so the result
+was the bun runtime wrapped around a program that did not need it: 98 MB where the official build is
+8.6 MB. It is now fetched and pinned like everything else, same version and same commit (0.1.33 /
+`08b6bcd5`), verified identical on every command the bridge calls and on a live `model list --json`.
+
+Notes worth keeping:
+
+- The diarization embedding model MUST NOT be a Mandarin-only one (`…_sv_zh-cn_…`): CupCat shipped
+  that until 1.7.13 and it merged two clearly different English speakers into a single "S1".
+- `tagging/class_labels_indices.csv` is not optional — `caption_sounds` maps its display names to the
+  words it writes.
+- Every sidecar folder carries its OWN `onnxruntime.dll`, and `ORT_DYLIB_PATH` points the faces
+  sidecar at the copy beside it. A sidecar that reaches into a sibling folder for its runtime is one
+  deletion away from silently loading Windows' own `System32\onnxruntime.dll` and failing in a way
+  every caller catches — see `apps/bridge/src/sidecars.test.ts`.
+- ⚠️ After REPLACING a sidecar file, delete the stale copy from the staging directory as well:
+  `tauri build` copies resources in but never removes ones that have gone from the source, so the old
+  file rides along in the installer — `rm target/release/sidecars/<the file you replaced>`.
 
 Wired env (`main.rs`): `CUPCAT_FFMPEG_BIN`, `CUPCAT_FFPROBE_BIN`, `CUPCAT_HIGGSFIELD_BIN`,
 `CUPCAT_WHISPER_KIND=cpp`, `CUPCAT_WHISPER_BIN`, `CUPCAT_WHISPER_MODEL_FILE`,

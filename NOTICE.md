@@ -27,7 +27,7 @@ The full GPL-3.0 text lives in `LICENSE`. Third-party dependencies retain their 
 
 The Windows installer ships these third-party tools as sidecars; each keeps its own license:
 
-- **ffmpeg / ffprobe** — © the FFmpeg project. The bundled build is GPL-licensed, compatible with CupCat's GPLv3. (ffmpeg.org)
+- **ffmpeg / ffprobe** — © the FFmpeg project. The bundled build is GPL-licensed, compatible with CupCat's GPLv3. (ffmpeg.org) The exact build is `N-125444-g6d72600a30-20260703`, a static Windows build by [BtbN](https://github.com/BtbN/FFmpeg-Builds); its corresponding source is `git.ffmpeg.org/ffmpeg.git` at commit `6d72600a30`, configured as `ffmpeg -version` reports.
 - **whisper.cpp** (`whisper-cli` + ggml libraries) — MIT, © ggml-org / G. Gerganov. (github.com/ggml-org/whisper.cpp)
 - **ggml large-v3-turbo (q5) & ggml-base** speech models — derived from OpenAI Whisper (MIT), redistributed via whisper.cpp.
 - **yt-dlp** — Unlicense (public domain); used for URL imports the user requests. (github.com/yt-dlp/yt-dlp)
