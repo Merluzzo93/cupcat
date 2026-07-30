@@ -113,8 +113,16 @@ jobs:
 
       # The bundled engines are in place by now, so the tests that exercise them actually run here
       # rather than skipping — including the one that checks each sidecar carries its own runtime.
+      #
+      # The two paths are not decoration. analyzeVideo resolves ffmpeg and ffprobe through config.ts,
+      # which falls back to the bare name on PATH — deliberately, for a dev shell. A GitHub runner has
+      # neither, and a developer's machine has some other build, which is the difference CLAUDE.md
+      # warns about and which has already shipped a bug.
       - name: Tests
         if: env.DO_BUILD == 'true'
+        env:
+          CUPCAT_FFMPEG_BIN: ${{ github.workspace }}/apps/desktop/src-tauri/sidecars/ffmpeg.exe
+          CUPCAT_FFPROBE_BIN: ${{ github.workspace }}/apps/desktop/src-tauri/sidecars/ffprobe.exe
         run: bun test
 
       # ── the installer ────────────────────────────────────────────────────────

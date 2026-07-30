@@ -7,14 +7,24 @@
 // light preview copy — the tests below hold both ends of that.
 
 import { describe, expect, it } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { analyzeVideo, scrubProxyPath } from "./ffmpeg";
 
-/** A real (tiny) video, so this exercises the actual ffmpeg path rather than a mock of it. */
+/**
+ * The BUNDLED ffmpeg, not whatever is on PATH.
+ *
+ * This used to fall back to the bare name "ffmpeg", which quietly meant these tests measured a
+ * different build from the one CupCat ships — the exact mistake CLAUDE.md warns about, and one that
+ * has already let a filter change through. On a machine with no ffmpeg on PATH the fallback did not
+ * even fail honestly: Bun.spawn threw from inside the helper.
+ */
+const BUNDLED_FFMPEG = resolve(import.meta.dir, "..", "..", "desktop", "src-tauri", "sidecars", "ffmpeg.exe");
+
 async function makeVideo(path: string, seconds: number, color: string): Promise<void> {
-  const ff = process.env.CUPCAT_FFMPEG_BIN ?? "ffmpeg";
+  const ff = process.env.CUPCAT_FFMPEG_BIN ?? BUNDLED_FFMPEG;
   const proc = Bun.spawn(
     [ff, "-y", "-v", "error", "-f", "lavfi", "-i", `color=c=${color}:size=160x120:duration=${seconds}:rate=10`, "-pix_fmt", "yuv420p", path],
     { stdout: "ignore", stderr: "ignore" },
@@ -22,7 +32,11 @@ async function makeVideo(path: string, seconds: number, color: string): Promise<
   await proc.exited;
 }
 
-describe("analysing a video", () => {
+// Skipped rather than failed when the bundled engines have not been provisioned — `bun run sidecars`
+// fetches them, and CI does it before this ever runs.
+const haveFfmpeg = !!process.env.CUPCAT_FFMPEG_BIN || existsSync(BUNDLED_FFMPEG);
+
+describe.skipIf(!haveFfmpeg)("analysing a video", () => {
   it("measures once and then answers from the cache", async () => {
     const dir = await mkdtemp(join(tmpdir(), "cupcat-analysis-"));
     try {
@@ -68,7 +82,7 @@ describe("analysing a video", () => {
       // A proxy whose CONTENT differs from the original: if the analysis came from the original,
       // the scene change between the proxy's two halves could not appear.
       const proxy = scrubProxyPath(src);
-      const ff = process.env.CUPCAT_FFMPEG_BIN ?? "ffmpeg";
+      const ff = process.env.CUPCAT_FFMPEG_BIN ?? BUNDLED_FFMPEG;
       const p = Bun.spawn(
         [
           ff, "-y", "-v", "error",
