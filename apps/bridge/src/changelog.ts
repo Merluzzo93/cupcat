@@ -31,6 +31,25 @@ export function localise(e: ChangelogEntry, lang: string): LocalisedEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.8.1",
+    title: "A smaller CupCat, and a build anyone can check",
+    points: [
+      "**CupCat takes about 100 MB less room on your disk**, and does exactly the same things. One of the bundled tools was being shipped wrapped in a runtime it never needed — 98 MB where the official build is 9 — and four copies of the same library were four different builds. This update replaces eleven files and downloads 64 MB, not the whole installer.",
+      "**One missing file came back.** A speech-synthesis data file had gone astray between its source and the installer, quietly, some releases ago. Nothing you would have noticed, and it is there now.",
+      "**Face blurring loads the right library, by name rather than by luck.** It was reaching into another tool's folder for the runtime it needs. It now carries its own, so nothing breaks the day that folder changes.",
+      "**Every bundled engine is now rebuilt from a pinned source with a checksum**, so what is inside the installer can be verified rather than trusted — and releases are built by a public workflow instead of on one laptop. That is also the groundwork for signing the installer, which is what makes Windows stop warning about it.",
+    ],
+    it: {
+      title: "Un CupCat più leggero, e una build che chiunque può verificare",
+      points: [
+        "**CupCat occupa circa 100 MB in meno sul disco**, e fa esattamente le stesse cose. Uno degli strumenti inclusi veniva distribuito avvolto in un runtime di cui non aveva bisogno — 98 MB dove quello ufficiale ne pesa 9 — e quattro copie della stessa libreria erano quattro build diverse. Questo aggiornamento sostituisce undici file e scarica 64 MB, non l'installer intero.",
+        "**È tornato un file che mancava.** Un file di dati per la sintesi vocale si era perso fra la sua origine e l'installer, in silenzio, qualche release fa. Niente che avresti notato, ma ora c'è.",
+        "**La sfocatura dei volti carica la libreria giusta perché la nomina, non per fortuna.** Andava a prendere il runtime nella cartella di un altro strumento. Ora ha la sua, così non si rompe il giorno in cui quella cartella cambia.",
+        "**Ogni motore incluso viene ora ricostruito da una fonte fissata, con un checksum**, quindi quello che c'è dentro l'installer si può verificare invece di darlo per buono — e le release sono costruite da un workflow pubblico anziché su un portatile. È anche la base per firmare l'installer, che è ciò che fa smettere Windows di avvisare.",
+      ],
+    },
+  },
+  {
     version: "1.8.0",
     title: "CupCat cuts the cameras, places the voices, and writes down the sounds",
     points: [

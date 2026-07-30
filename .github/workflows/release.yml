@@ -24,6 +24,13 @@ on:
         type: choice
         default: installer
         options: [sidecars, build, installer]
+      host_tag:
+        description: >-
+          Publish the changed files into an EXISTING release tag (e.g. v1.8.0) instead of this
+          version's own. That is how a small update reaches everyone without a release page of its
+          own: the version moves, the tag does not, and CupCat reads the version from the manifest.
+        type: string
+        required: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -205,7 +212,11 @@ jobs:
       # wrong one puts a checksum in the manifest that no installed copy can ever match.
       - name: Manifest, from the installer itself
         if: env.DO_INSTALLER == 'true'
-        run: bun run apps/desktop/tools/manifest.ts ${{ steps.found.outputs.version }} --installer ${{ steps.final.outputs.exe }}
+        shell: bash
+        run: |
+          bun run apps/desktop/tools/manifest.ts "${{ steps.found.outputs.version }}" \
+            --installer "${{ steps.final.outputs.exe }}" \
+            ${{ inputs.host_tag && format('--tag {0}', inputs.host_tag) || '' }}
 
       - name: Check the manifest against the installer
         if: env.DO_INSTALLER == 'true'
