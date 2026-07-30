@@ -87,6 +87,7 @@ jobs:
       # ── the one sidecar we build rather than download ─────────────────────────
       - name: Build the face detector
         if: env.DO_BUILD == 'true'
+        shell: bash
         run: |
           cargo build --release --manifest-path apps/faces/Cargo.toml
           cp apps/faces/target/release/cupcat-faces.exe apps/desktop/src-tauri/sidecars/faces/
@@ -96,10 +97,14 @@ jobs:
         if: env.DO_BUILD == 'true'
         run: bun run build:web
 
+      # binaries/ is gitignored — it only ever holds this one compiled file — so a clean checkout has
+      # no such directory and the copy has to create it.
       - name: Compile the engine
         if: env.DO_BUILD == 'true'
+        shell: bash
         run: |
           bun run build:bridge
+          mkdir -p apps/desktop/src-tauri/binaries
           cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
 
       - name: Typecheck
