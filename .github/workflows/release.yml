@@ -1,0 +1,163 @@
+name: Release
+
+# Build the Windows installer on a GitHub-hosted runner.
+#
+# This workflow is not a convenience. Code signing is what stops SmartScreen from telling every user
+# that CupCat is dangerous, the only free way for a solo developer to sign is SignPath's OSS plan, and
+# SignPath will only sign artifacts whose whole build ran on GitHub-hosted agents — a locally built
+# installer cannot be submitted at all. So the build has to live here.
+#
+# Run it from the Actions tab. `stage` stops it early, because a full run is long and the answer to
+# "did provisioning work" should not cost an hour:
+#
+#   sidecars   ~5 min   download and assemble the 403 bundled engine files, verify against the lock
+#   build      ~15 min  + web SPA, engine, face detector, typecheck, 716 tests
+#   installer  ~45 min  + tauri build → CupCat_<version>_x64-setup.exe as a workflow artifact
+#
+# Nothing is published. Releasing stays a deliberate act with a human behind it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: How far to go
+        type: choice
+        default: installer
+        options: [sidecars, build, installer]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    # A `run: exit 0` would NOT stop a workflow, so the stages are gated by these two booleans on
+    # every step rather than by a step that pretends to be an early return.
+    env:
+      DO_BUILD: ${{ inputs.stage != 'sidecars' }}
+      DO_INSTALLER: ${{ inputs.stage == 'installer' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Inputs, the extracted engines, the Rust target dir and a 1.5 GB installer add up. If a run
+      # ever dies with a confusing error, look here first — out of disk does not announce itself.
+      - name: Disk before
+        shell: bash
+        run: df -h
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop/src-tauri
+            apps/faces
+
+      # Keyed on the pinned sources, so editing sources.ts correctly invalidates it.
+      - name: Cache bundled engine downloads
+        uses: actions/cache@v4
+        with:
+          path: .sidecar-cache
+          key: sidecars-${{ hashFiles('tools/sidecars/sources.ts') }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Ends by checking the assembled tree against tools/sidecars/sidecars.lock.json, so a source
+      # that quietly starts serving something else fails the build instead of shipping.
+      - name: Provision bundled engines
+        run: bun run sidecars
+
+      - name: Disk after engines
+        shell: bash
+        run: df -h
+
+      # ── the one sidecar we build rather than download ─────────────────────────
+      - name: Build the face detector
+        if: env.DO_BUILD == 'true'
+        run: |
+          cargo build --release --manifest-path apps/faces/Cargo.toml
+          cp apps/faces/target/release/cupcat-faces.exe apps/desktop/src-tauri/sidecars/faces/
+
+      # ── the app itself ───────────────────────────────────────────────────────
+      - name: Build the web SPA
+        if: env.DO_BUILD == 'true'
+        run: bun run build:web
+
+      - name: Compile the engine
+        if: env.DO_BUILD == 'true'
+        run: |
+          bun run build:bridge
+          cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
+
+      - name: Typecheck
+        if: env.DO_BUILD == 'true'
+        run: bun run typecheck
+
+      # The bundled engines are in place by now, so the tests that exercise them actually run here
+      # rather than skipping — including the one that checks each sidecar carries its own runtime.
+      - name: Tests
+        if: env.DO_BUILD == 'true'
+        run: bun test
+
+      # ── the installer ────────────────────────────────────────────────────────
+      # The CLI is pinned to the version of the tauri crates in Cargo.lock (2.11.3). `@latest` would
+      # mean the tool that assembles the installer could change between two runs of the same commit.
+      - name: Build the installer
+        if: env.DO_INSTALLER == 'true'
+        run: npx @tauri-apps/cli@2.11.3 build
+        working-directory: apps/desktop
+
+      - name: Disk after build
+        if: env.DO_INSTALLER == 'true'
+        shell: bash
+        run: df -h
+
+      - name: Read the version out of the installer name
+        if: env.DO_INSTALLER == 'true'
+        id: found
+        shell: bash
+        run: |
+          exe=$(ls apps/desktop/src-tauri/target/release/bundle/nsis/CupCat_*_x64-setup.exe)
+          echo "exe=$exe" >> "$GITHUB_OUTPUT"
+          echo "version=$(basename "$exe" | sed -E 's/^CupCat_(.+)_x64-setup\.exe$/\1/')" >> "$GITHUB_OUTPUT"
+          ls -la "$exe"
+
+      # The manifest the in-app updater reads. It has to come from the installer, not from
+      # target/release: tauri stamps cupcat.exe while bundling, so the two differ and publishing the
+      # wrong one puts a checksum in the manifest that no installed copy can ever match.
+      - name: Manifest, from the installer itself
+        if: env.DO_INSTALLER == 'true'
+        run: bun run apps/desktop/tools/manifest.ts ${{ steps.found.outputs.version }}
+
+      - name: Check the manifest against the installer
+        if: env.DO_INSTALLER == 'true'
+        shell: bash
+        run: |
+          7z x -y -o"$RUNNER_TEMP/payload" "${{ steps.found.outputs.exe }}" > /dev/null
+          rm -rf "$RUNNER_TEMP/payload/\$PLUGINSDIR"
+          bun run apps/desktop/tools/check-manifest.ts \
+            "apps/desktop/manifests/${{ steps.found.outputs.version }}.json" "$RUNNER_TEMP/payload"
+
+      - name: Upload the installer
+        if: env.DO_INSTALLER == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CupCat-${{ steps.found.outputs.version }}-unsigned
+          path: |
+            ${{ steps.found.outputs.exe }}
+            apps/desktop/manifests/${{ steps.found.outputs.version }}.json
+          retention-days: 7
+          compression-level: 0
