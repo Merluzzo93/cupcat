@@ -106,7 +106,7 @@ this project five bad releases.
 
 ```
 provision engines → verify against the lock
-build web, engine, face detector → typecheck → 716 tests
+build web, engine, face detector → typecheck → 761 tests
 tauri build → installer
 upload as a workflow artifact
 SignPath: submit → WAIT FOR YOUR MANUAL APPROVAL → signed installer comes back

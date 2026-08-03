@@ -26,12 +26,15 @@ rebuilding one.
 - **Line endings vary per file** in this repo. A replacement anchored on the wrong ones fails
   silently, and `git commit -a` then commits nothing.
 - **No export without a check.** `quality_report` exists for this; the agent instructions require it.
+- **Set `CUPCAT_PROJECT_DIR` before running anything that calls a tool.** Tools that add an asset end
+  with `saveProject`, which writes `project.json` in the *user's real* project folder — a scratch
+  script driving `executeTool` overwrites whatever project is there. Point it at a temp directory.
 
 ## Building and releasing
 
 ```
 bun run sidecars                       # 402 bundled engine files, pinned + hash-verified
-bun run typecheck && bun test          # 716 tests; all must pass
+bun run typecheck && bun test          # 761 tests; all must pass
 bun run build:web && bun run build:bridge
 cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
 cd apps/desktop && npx @tauri-apps/cli@latest build      # needs cargo AND node on PATH

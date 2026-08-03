@@ -1038,6 +1038,43 @@ export async function analyzeVideo(url: string, opts: { sceneThreshold?: number;
 }
 
 /**
+ * How much is HAPPENING in a video, 0..1 — the mean frame-to-frame change.
+ *
+ * ffmpeg's scene score is normally used with a threshold to find cuts; averaged instead, it is a
+ * decent measure of liveliness. Measured: a screen recording of a static UI scores 0.023, handheld
+ * footage of a person 0.099 — four times more, which is the ordering a montage needs.
+ *
+ * Deliberately cheap: 160 px wide at 5 fps, off the scrub proxy when one exists. It is a ranking
+ * signal, not a measurement anyone reads, so precision past "which of these is livelier" is wasted.
+ */
+export async function motionEnergy(url: string): Promise<number | null> {
+  const proxy = scrubProxyPath(url);
+  const read = (await Bun.file(proxy).exists()) && Bun.file(proxy).size > 1024 ? proxy : url;
+  try {
+    const { stderr, stdout } = await run(FFMPEG_BIN, [
+      "-v", "error",
+      "-i", read,
+      "-an",
+      "-vf", "scale=160:-2,fps=5,select='gte(scene,0)',metadata=print:file=-",
+      "-f", "null", "-",
+    ]);
+    let sum = 0;
+    let n = 0;
+    for (const m of `${stdout}\n${stderr}`.matchAll(/scene_score=([0-9.]+)/g)) {
+      const v = Number.parseFloat(m[1]!);
+      if (Number.isFinite(v)) {
+        sum += v;
+        n++;
+      }
+    }
+    // The first frame has nothing to differ from, so a one-frame answer says nothing.
+    return n > 1 ? sum / n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Detect ranges where the PICTURE stops moving, via ffmpeg `freezedetect`.
  *
  * The counterpart to silence: footage with no speech — a screen recording, a locked-off camera, a

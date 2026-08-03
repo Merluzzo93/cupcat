@@ -26,6 +26,7 @@ import {
   type Project,
 } from "@cupcat/editor-core";
 import { detectBeatsFromEnvelope } from "./beats";
+import { buildBlueprint, matchFootage, type Candidate } from "./reference";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { BRIDGE_PORT, exportsDir, FFMPEG_BIN, mediaDir, projectRoot } from "./config";
@@ -43,9 +44,10 @@ import { autoRoughCut } from "./roughcut";
 import { reframeLocal } from "./reframe-local";
 import { applyTemplate, listTemplates, saveTemplate } from "./templates";
 import { smoothSlowMo } from "./slowmo";
+import { reverseVideo } from "./reverse";
 import { separateStems } from "./separate";
 import { trackMotion } from "./track-local";
-import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, isHeavySource, probeMedia, sourceTimecode, videoStills } from "./ffmpeg";
+import { analyzeVideo, audioEnvelope, audioSilences, ensureAudioProxy, ensureScrubProxy, ensureThumbnail, frameToBase64, isHeavySource, motionEnergy, probeMedia, sourceTimecode, videoStills } from "./ffmpeg";
 import { intersectRanges, shapeRanges } from "./ranges";
 import { suggestThumbnails } from "./thumbnails";
 import { echoedByPicture } from "./speechclips";
@@ -2087,6 +2089,201 @@ async function splitAudioBySpeakerTool(ctx: BridgeContext, args: Args): Promise<
 }
 
 /**
+ * remake_reference — read an edit off a finished video and rebuild it with the user's footage.
+ *
+ * "Make mine like this one" is a request no other tool here answers. CupCat could already measure
+ * every part of it separately — analyze_footage finds the cuts, detect_beats finds the tempo,
+ * audioEnvelope gives the loudness — and measuring is the easy half. The work is deciding which cut
+ * is real, what counts as a drop, and which of your clips belongs on which shot; those rules live in
+ * reference.ts with their tests, and this function only feeds them numbers and applies the answer.
+ *
+ * Two signals, deliberately different. The reference's energy comes from its AUDIO, because what
+ * shapes a montage is the music. The user's footage is ranked by MOTION, because b-roll is usually
+ * silent and what makes a shot lively is what is happening in frame. Neither number is ever compared
+ * against the other — only their orders are.
+ */
+async function remakeReferenceTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const doc = ctx.doc;
+  const refName = strOpt(args.reference) ?? strOpt(args.mediaRef);
+  const ref = refName ? (doc.asset(refName) ?? doc.project.media.find((m) => m.name === refName) ?? null) : null;
+  if (!ref) return fail(`Reference not found: ${refName ?? "(reference is required — pass the library id or name of the video to imitate)"}`);
+  if (ref.type !== "video" || !ref.url) return fail("remake_reference needs a VIDEO asset as the reference — it reads the cuts off the picture.");
+
+  const duration = (await probeMedia(ref.url)).durationSeconds;
+  if (!(duration > 0)) return fail(`Could not read the duration of "${ref.name}".`);
+
+  // Cuts, then the loudness that gives every shot its weight.
+  const analysis = await analyzeVideo(ref.url, { sceneThreshold: numOpt(args.sceneThreshold), scenesOnly: true });
+  const env = ref.hasAudio ? await audioEnvelope(ref.url, 0, duration, `ref_${ref.id}`, 100) : null;
+  const beats = env ? detectBeatsFromEnvelope(env, 100) : { bpm: 0, beats: [], onsets: [], confidence: 0 };
+
+  const blueprint = buildBlueprint(analysis.sceneChanges, duration, env, 100, beats, {
+    minShotSeconds: numOpt(args.minShotSeconds),
+  });
+  if (blueprint.shots.length === 0) return fail(`"${ref.name}" produced no shots to copy.`);
+
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const shape = {
+    reference: ref.name,
+    durationSeconds: blueprint.durationSeconds,
+    shots: blueprint.shots.length,
+    medianShotSeconds: blueprint.medianShotSeconds,
+    shortestShotSeconds: blueprint.shortestShotSeconds,
+    longestShotSeconds: blueprint.longestShotSeconds,
+    bpm: blueprint.bpm ? r2(blueprint.bpm) : 0,
+    beatConfidence: r2(blueprint.beatConfidence),
+    cutsOnBeat: blueprint.cutsOnBeat,
+    dropSeconds: blueprint.dropSeconds,
+    // Not called `note`: the tool's own note is spread in after this and would silently swallow it.
+    ...(env ? {} : { audioNote: "The reference has no audio, so every shot scored 0 energy and there is no rhythm to follow." }),
+  };
+
+  // Without footage this is a reading, not a rebuild — which is a useful answer on its own.
+  const listed = Array.isArray(args.footage) ? (args.footage as unknown[]) : args.footage !== undefined ? [args.footage] : [];
+  const wanted = listed.filter((x): x is string => typeof x === "string" && x.trim() !== "");
+  if (wanted.length === 0) {
+    return okJson({
+      ...shape,
+      cuts: blueprint.shots.slice(1).map((s) => ({ atSeconds: r2(s.startSeconds), onBeat: s.onBeat })),
+      shotList: blueprint.shots.map((s) => ({ index: s.index, startSeconds: r2(s.startSeconds), durationSeconds: r2(s.durationSeconds), energy: s.energy })),
+      note:
+        "This is the reference's shape, nothing was changed. To rebuild it with your own material, call remake_reference again with footage: [asset ids] — clips get matched to shots by how lively they are." +
+        (blueprint.cutsOnBeat >= 0.6 ? " This edit is cut to the music, so keep the same track under it or the rhythm goes." : ""),
+    });
+  }
+
+  const candidates: Candidate[] = [];
+  const stills = new Set<string>();
+  const missing: string[] = [];
+  const silent: string[] = [];
+  for (const w of wanted) {
+    const a = doc.asset(w) ?? doc.project.media.find((m) => m.name === w) ?? null;
+    if (!a || !a.url || a.type === "audio") {
+      missing.push(w);
+      continue;
+    }
+    if (a.type === "image") {
+      // A still covers any slot and never moves. Its length is capped at the longest shot rather than
+      // left unbounded, so it satisfies coverage without automatically winning "the longest clip
+      // available" against real footage; its liveliness is a neutral 0.5, not a measurement.
+      stills.add(a.id);
+      candidates.push({ mediaRef: a.id, name: a.name, durationSeconds: blueprint.longestShotSeconds, energy: 0.5 });
+      continue;
+    }
+    const dur = (await probeMedia(a.url)).durationSeconds;
+    if (!(dur > 0)) {
+      silent.push(a.name);
+      continue;
+    }
+    candidates.push({ mediaRef: a.id, name: a.name, durationSeconds: dur, energy: (await motionEnergy(a.url)) ?? 0.5 });
+  }
+  if (missing.length > 0) return fail(`Not usable as footage: ${missing.join(", ")} — pass library VIDEO or IMAGE ids (audio can't fill a shot).`);
+  if (candidates.length === 0) return fail(`None of the footage could be read${silent.length > 0 ? `: ${silent.join(", ")}` : ""}.`);
+
+  // Rank, so the report shows why each clip landed where it did.
+  const ranking = [...candidates].sort((a, b) => b.energy - a.energy).map((c) => ({ name: c.name, motion: r2(c.energy), ...(stills.has(c.mediaRef) ? { still: true } : {}) }));
+  const plan = matchFootage(blueprint.shots, candidates);
+
+  const fps = doc.timeline.fps;
+  const onTrack = numOpt(args.trackIndex);
+  const srcFrames = new Map(candidates.map((c) => [c.mediaRef, Math.floor(c.durationSeconds * fps)]));
+  // Each piece ends exactly where the next one starts. Rounding every start and duration on its own
+  // would leave a one-frame hole (black) or a one-frame overlap at some of the joins.
+  const entries = plan.map((a, i) => {
+    const startFrame = Math.round(a.startSeconds * fps);
+    const next = plan[i + 1];
+    const endFrame = next ? Math.round(next.startSeconds * fps) : Math.round((a.startSeconds + a.durationSeconds) * fps);
+    const frames = Math.max(1, endFrame - startFrame);
+    // A still has no "later in the clip"; real footage never starts so late that it runs off the end.
+    const from = stills.has(a.mediaRef) ? 0 : Math.min(Math.round(a.sourceStartSeconds * fps), Math.max(0, (srcFrames.get(a.mediaRef) ?? frames) - frames));
+    return {
+      mediaRef: a.mediaRef,
+      startFrame,
+      durationFrames: frames,
+      trimStartFrame: from,
+      trimEndFrame: from + frames,
+      ...(onTrack !== undefined ? { trackIndex: onTrack } : {}),
+    };
+  });
+
+  const described = plan.map((a) => ({
+    shot: a.shotIndex,
+    atSeconds: a.startSeconds,
+    durationSeconds: a.durationSeconds,
+    clip: a.name,
+    ...(stills.has(a.mediaRef) ? {} : { fromSeconds: a.sourceStartSeconds }),
+    why: a.why,
+  }));
+
+  // Copying a beat-cut edit without its music copies the cuts and throws away what they were cut to.
+  // Off by default because it renders a file and takes the WHOLE reference audio, voice-over and all.
+  const withMusic = args.withMusic === true && ref.hasAudio;
+
+  if (args.preview !== false) {
+    return okJson({
+      ...shape,
+      footageByMotion: ranking,
+      plan: described,
+      previewOnly: true,
+      note:
+        `Nothing was changed. This fills all ${blueprint.shots.length} shot(s) across ${blueprint.durationSeconds}s with ${plan.length} piece(s), matching each shot's energy to how lively your footage is. ` +
+        (plan.length > blueprint.shots.length
+          ? "Some shots needed more than one piece because no clip is long enough to cover them — those get a cut the reference does not have. Longer footage removes them. " : "") +
+        "Show the user the shape and the plan, then call remake_reference again with preview:false to build it." +
+        (blueprint.cutsOnBeat >= 0.6 && ref.hasAudio && !withMusic
+          ? " These cuts are on the music, so pass withMusic:true as well — otherwise the rhythm they were built for is missing." : "") +
+        (blueprint.dropSeconds !== null ? ` The reference's biggest moment is at ${blueprint.dropSeconds}s — put the best shot there.` : ""),
+    });
+  }
+
+  // The reference's own sound, as its own library asset. Whole track, not separated: isolating the
+  // music is separate_stems' job and takes minutes, and most references are music-only anyway.
+  let music: { id: string; name: string; seconds: number } | null = null;
+  if (withMusic && ref.url) {
+    const out = join(mediaDir, `refaudio_${ref.id}.m4a`);
+    const { code } = await run(FFMPEG_BIN, ["-y", "-i", ref.url, "-vn", "-c:a", "aac", "-b:a", "192k", out]);
+    if (code === 0) {
+      const p = await probeMedia(out);
+      const id = newId("asset");
+      const name = `${ref.name} (audio)`;
+      doc.addAsset({ id, type: "audio", name, url: out, durationSeconds: p.durationSeconds || duration, hasAudio: true } as MediaAsset);
+      music = { id, name, seconds: p.durationSeconds || duration };
+    }
+  }
+
+  // add_clips refuses a mix of explicit and omitted trackIndex in one call, so an explicit video track
+  // forces the audio into a second call — the normal (omitted) path stays one undoable action.
+  const audioEntry = music ? { mediaRef: music.id, startFrame: 0, durationFrames: Math.max(1, Math.round(music.seconds * fps)), trimStartFrame: 0, trimEndFrame: Math.max(1, Math.round(music.seconds * fps)) } : null;
+  const applied: string[] = [];
+  if (onTrack !== undefined) {
+    applied.push(addClips(doc, { entries, replace: true }, "agent"));
+    if (audioEntry) applied.push(addClips(doc, { entries: [audioEntry] }, "agent"));
+  } else {
+    applied.push(addClips(doc, { entries: audioEntry ? [...entries, audioEntry] : entries }, "agent"));
+  }
+  if (music) {
+    doc.notifyChanged();
+    await saveProject(doc.project);
+  }
+
+  return okJson({
+    ...shape,
+    footageByMotion: ranking,
+    plan: described,
+    ...(music ? { music: music.name } : {}),
+    applied: applied.join(" "),
+    note:
+      `Rebuilt "${ref.name}"'s shape with ${new Set(plan.map((p) => p.mediaRef)).size} clip(s) across ${blueprint.shots.length} shot(s)${plan.length > blueprint.shots.length ? `, in ${plan.length} pieces — some shots were longer than any single clip` : ""}.` +
+      (music
+        ? ` The reference's own audio is under it as "${music.name}" — if it has voice-over you do not want, separate_stems will pull the music out of it.`
+        : blueprint.cutsOnBeat >= 0.6
+          ? ` The reference is cut to its music, which is NOT here — re-run with withMusic:true, or put a track at ${Math.round(blueprint.bpm)} BPM underneath, or the cuts land on nothing.`
+          : "") +
+      (blueprint.dropSeconds !== null ? ` Its biggest moment is at ${blueprint.dropSeconds}s.` : ""),
+  });
+}
+
+/**
  * Camera switching driven by who is talking.
  *
  * multicam_cut already does the surgery; what it wants is a list of switch points, and writing that
@@ -3315,6 +3512,51 @@ async function smoothSlowMoTool(ctx: BridgeContext, args: Args): Promise<ToolOut
   }
 }
 
+/**
+ * reverse_video — play it backwards.
+ *
+ * A rendered asset, not a clip property, and for the same reason as auto_pan and denoise_video: the
+ * preview plays through an HTML <video>, which cannot run backwards. A `reversed` flag on the clip
+ * would preview forwards and export backwards, which is worse than not having the feature. A new
+ * library asset looks the same everywhere.
+ */
+async function reverseVideoTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const ref = strOpt(args.mediaRef) ?? strOpt(args.media);
+  if (!ref) return fail("mediaRef is required (a library video's id or name)");
+  const a = ctx.doc.asset(ref) ?? ctx.doc.project.media.find((m) => m.name === ref) ?? null;
+  if (!a) return fail(`Asset not found: ${ref}`);
+  if (a.type !== "video" || !a.url) return fail("reverse_video takes a VIDEO asset from the library.");
+  try {
+    const res = await reverseVideo(a.url, {
+      killTag: "reverse_video",
+      onProgress: (done, total) => emitProgress("reverse_video", `Reversing "${a.name}" — ${done}/${total}`),
+    });
+    const probe = await probeMedia(res.path);
+    const id = newId("asset");
+    ctx.doc.addAsset({
+      id,
+      type: "video",
+      name: `${a.name} (reversed)`,
+      url: res.path,
+      durationSeconds: probe.durationSeconds,
+      sourceWidth: probe.width,
+      sourceHeight: probe.height,
+      sourceFPS: probe.fps,
+      hasAudio: res.hasAudio,
+    } as MediaAsset);
+    void ensureThumbnail(res.path).catch(() => {});
+    ctx.doc.notifyChanged();
+    await saveProject(ctx.doc.project);
+    return ok(
+      `Reversed "${a.name}" locally → new asset ${id} (${res.durationSeconds.toFixed(1)}s${res.chunks > 1 ? `, rendered in ${res.chunks} pieces so it fits in memory` : ""}). ` +
+        (a.hasAudio && !res.hasAudio ? "The sound could not be reversed, so this copy is silent. " : "") +
+        "The original is untouched — add the reversed asset with add_clips.",
+    );
+  } catch (e) {
+    return fail(`reverse_video failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 async function autoReframeTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const ref = strOpt(args.mediaRef);
   if (!ref) return fail("mediaRef is required (a library video's id or name)");
@@ -3629,6 +3871,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         return await autoReframeTool(ctx, args);
       case "smooth_slowmo":
         return await smoothSlowMoTool(ctx, args);
+      case "reverse_video":
+        return await reverseVideoTool(ctx, args);
       case "separate_stems":
         return await separateStemsTool(ctx, args);
       case "track_motion":
@@ -3709,6 +3953,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         );
       case "auto_multicam":
         return await autoMulticamTool(ctx, args);
+      case "remake_reference":
+        return await remakeReferenceTool(ctx, args);
       case "auto_pan":
         return await autoPanTool(ctx, args);
       case "multicam_cut":

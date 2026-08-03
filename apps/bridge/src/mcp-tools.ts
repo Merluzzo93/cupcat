@@ -1163,6 +1163,31 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "remake_reference",
+    description:
+      "THE tool for 'make my video like THIS one' / 'stessa cosa di questo video': reads a finished video as an EDIT BLUEPRINT — where every cut lands, how long the shots are, how loud each one is, the BPM, how many cuts sit on a beat, and where the track opens up — and then rebuilds that shape on the timeline with the user's own footage, one undoable action. Without footage it only reports the blueprint, which is also how to answer 'how is this video edited?'. Clips are matched to shots by liveliness: the shot's loudness in the reference decides how energetic a clip belongs there, measured on the footage as MOTION (so silent b-roll still ranks). One clip can fill many shots — it plays forwards across them instead of repeating the same seconds. Pass preview:true (the default) to show the plan first.",
+    inputSchema: obj(
+      {
+        reference: { type: "string", description: "Library id or name of the VIDEO to imitate. Its cuts and its music are what get copied — not its pictures." },
+        footage: {
+          type: "array",
+          items: { type: "string" },
+          description: "Library ids/names of the user's own VIDEO or IMAGE assets to rebuild the edit with. Omit to only read the reference's blueprint and change nothing.",
+        },
+        withMusic: {
+          type: "boolean",
+          description:
+            "Also put the reference's OWN audio under the rebuild as a new library asset. Off by default because it takes the whole track, voice-over included (separate_stems isolates the music afterwards). Turn it on whenever cutsOnBeat is high — those cuts were made for that track.",
+        },
+        preview: { type: "boolean", description: "Default TRUE: return the blueprint and the plan without touching the timeline. Pass false to actually build it." },
+        sceneThreshold: { type: "number", description: "How different two frames must be to count as a cut, 0.05–0.9 (default 0.3). Raise it if a shaky reference reports cuts that are not there." },
+        minShotSeconds: { type: "number", description: "Cuts closer together than this are treated as one (default 0.25). Raise for a calmer rebuild." },
+        trackIndex: { type: "integer", description: "Build onto this existing video track, OVERWRITING what is in the way. Omit — the normal case — and the rebuild lands on a fresh track." },
+      },
+      ["reference"],
+    ),
+  },
+  {
     name: "multicam_cut",
     description:
       "THE tool for 'montaggio multicam' after sync_audio: give it the synced angle clips (one per camera, stacked on separate video tracks, aligned in time) and where to switch. In ONE undoable call it computes the angles' common overlap window, splits every angle at every cut, keeps only the chosen angle's picture per segment (the other angles' pieces in that span are removed), and keeps ONE camera's audio CONTINUOUS across the whole window — picture switches, sound never cuts. Before the first cut the first listed angle shows. For music-driven switching, run detect_beats first and use (a subset of) the beat frames as cut points. Do NOT build a multicam montage by hand from split_clip + remove_clips.",
@@ -1530,6 +1555,12 @@ export const TOOL_DEFS: ToolDef[] = [
       },
       ["mediaRef"],
     ),
+  },
+  {
+    name: "reverse_video",
+    description:
+      "LOCAL reverse (free, offline): render a VIDEO played backwards — 'al contrario', 'reverse', 'rewind', 'boomerang', the pour-back / jump-back-up trick. Sound is reversed too when there is any. Long or high-resolution files are rendered in pieces automatically, so this does not run the machine out of memory the way a plain ffmpeg reverse does. Returns a NEW library video; the original is untouched. There is no 'reversed' clip property to set instead — the preview cannot play a clip backwards, so a reversed COPY is the only thing that looks the same in the preview and in the export.",
+    inputSchema: obj({ mediaRef: { type: "string", description: "Video asset id or name." } }, ["mediaRef"]),
   },
   {
     name: "upscale_media",

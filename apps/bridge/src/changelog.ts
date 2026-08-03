@@ -31,6 +31,27 @@ export function localise(e: ChangelogEntry, lang: string): LocalisedEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.9.0",
+    title: "\"Make mine like this one\" — and everything backwards",
+    points: [
+      "**Show CupCat a video you like and it rebuilds that edit with your own footage.** It reads the finished video the way an editor would: where every cut falls, how long each shot runs, the tempo of the music, how many cuts sit exactly on a beat, and the moment the track opens up. Then it lays your clips into that shape — the liveliest ones on the loudest moments, the calm ones on the quiet moments — and tells you, shot by shot, why each clip went where it did. Ask without giving it any footage and you get the reading on its own, which is the answer to \"how is this edited?\".",
+      "**It brings the music along.** The cuts of a montage were made for a particular track, so CupCat can put the reference's own audio underneath the rebuild. Without it, cuts on the beat land on nothing.",
+      "**A shot longer than any clip you own is filled with more than one.** That is what a human editor does, and it is said plainly in the plan — so a rebuild never contains a clip stretched past its own ending.",
+      "**Videos can now be played backwards.** The rewind, the boomerang, the pour-it-back trick — with the sound reversed too. Long or 4K files are rendered in pieces automatically, so this works on the two-minute clip and not only on the ten-second one: the obvious way to do it needs about 5 GB of memory per minute of 1080p.",
+      "**A test now checks that every tool CupCat advertises is one it can actually run.** Adding a tool takes two edits in two files, and nothing linked them: forget the second and the assistant offers something that answers \"unknown tool\". It cannot happen again.",
+    ],
+    it: {
+      title: "\"Fammene uno come questo\" — e tutto al contrario",
+      points: [
+        "**Mostra a CupCat un video che ti piace e lui ricostruisce quel montaggio con il tuo materiale.** Legge il video finito come farebbe un montatore: dove cade ogni stacco, quanto dura ogni inquadratura, il tempo della musica, quanti stacchi cadono esattamente sul beat e il momento in cui il brano si apre. Poi dispone le tue clip in quella forma — le più vivaci sui momenti più forti, le più calme su quelli quieti — e ti dice, inquadratura per inquadratura, perché ogni clip è finita lì. Chiediglielo senza dargli materiale e ottieni solo la lettura, che è la risposta a \"com'è montato questo?\".",
+        "**Si porta dietro la musica.** Gli stacchi di un montaggio sono stati fatti per un brano preciso, quindi CupCat può mettere l'audio del video di riferimento sotto alla ricostruzione. Senza, gli stacchi a tempo cadono sul nulla.",
+        "**Un'inquadratura più lunga di qualsiasi clip tua viene riempita con più di una.** È quello che fa un montatore, ed è scritto chiaramente nel piano — così una ricostruzione non contiene mai una clip tirata oltre la sua fine.",
+        "**Ora i video si possono riprodurre al contrario.** Il rewind, il boomerang, il trucco del liquido che torna nella bottiglia — con anche l'audio invertito. I file lunghi o in 4K vengono renderizzati a pezzi in automatico, così funziona anche sulla clip da due minuti e non solo su quella da dieci secondi: il modo ovvio di farlo chiede circa 5 GB di memoria per ogni minuto di 1080p.",
+        "**Un test verifica che ogni strumento che CupCat dichiara sia uno che sa davvero eseguire.** Aggiungere uno strumento richiede due modifiche in due file, e niente li collegava: dimentichi la seconda e l'assistente ti propone qualcosa che risponde \"strumento sconosciuto\". Non può più succedere.",
+      ],
+    },
+  },
+  {
     version: "1.8.1",
     title: "A smaller CupCat, and a build anyone can check",
     points: [
