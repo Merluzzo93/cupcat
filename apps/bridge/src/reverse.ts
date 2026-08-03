@@ -11,7 +11,7 @@
 // megabytes even for a long video — so it is done in one pass and muxed back in, which also avoids the
 // clicks that per-chunk AAC encoding leaves at every join.
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FFMPEG_BIN, mediaDir } from "./config";
@@ -60,6 +60,9 @@ export async function reverseVideo(src: string, opts: ReverseOptions = {}): Prom
   const fps = probe.fps && probe.fps > 0 ? probe.fps : 30;
   const seconds = chunkSeconds(probe.width ?? 1920, probe.height ?? 1080, fps, opts.frameBudgetBytes ?? 800_000_000);
   const ranges = chunkRanges(dur, seconds);
+  // The app makes this folder at startup, but this function is also called before that has happened —
+  // ffmpeg's answer to a missing output directory is "No such file or directory" after all the work.
+  await mkdir(mediaDir, { recursive: true });
   const outPath = join(mediaDir, `reversed_${Math.round(dur * 1000)}_${Date.now()}.mp4`);
   const tag = opts.killTag;
 

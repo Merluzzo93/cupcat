@@ -2240,6 +2240,7 @@ async function remakeReferenceTool(ctx: BridgeContext, args: Args): Promise<Tool
   // music is separate_stems' job and takes minutes, and most references are music-only anyway.
   let music: { id: string; name: string; seconds: number } | null = null;
   if (withMusic && ref.url) {
+    await mkdir(mediaDir, { recursive: true });
     const out = join(mediaDir, `refaudio_${ref.id}.m4a`);
     const { code } = await run(FFMPEG_BIN, ["-y", "-i", ref.url, "-vn", "-c:a", "aac", "-b:a", "192k", out]);
     if (code === 0) {
