@@ -31,6 +31,25 @@ export function localise(e: ChangelogEntry, lang: string): LocalisedEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.9.1",
+    title: "Zooms no longer export as black",
+    points: [
+      "**A zoom or push-in came out BLACK in the exported file** — while the preview showed it perfectly the whole time. If your video had a punch-in, everything from that moment on was a black screen with the subtitles still readable on top. The cause was in the last step of rendering, where the zoomed shot lost its place on the timeline and was drawn before its own moment arrived. Fixed, and covered by a test so it cannot come back quietly.",
+      "**CupCat can now tell you which voices it has, before you spend anything.** There was no way to ask: the only way to find out a voice name was wrong was to pay for the audio and read the error. Now one free question lists the offline voices and every voice on your Higgsfield account with the exact identifier each one needs — and it says plainly when what you asked for (a male Italian narrator, say) is not among the ones bundled, instead of letting the assistant keep guessing.",
+      "**The intro/outro card works again on a project that has a voice track.** It was putting its backdrop on whichever track happened to be at the top, and if that was audio it simply failed — twice, without saying why, leaving unused backdrops behind in your library each time.",
+      "**A title and its subtitle no longer print on top of each other.** Asking for a line at a given height worked one way of writing it and was silently ignored the other, which stacked both lines in the middle of the frame.",
+    ],
+    it: {
+      title: "Gli zoom non escono più neri",
+      points: [
+        "**Uno zoom o un push-in usciva NERO nel file esportato** — mentre l'anteprima lo mostrava perfettamente. Se il tuo video aveva un punch-in, da quel momento in poi c'era uno schermo nero con sopra i sottotitoli ancora leggibili. La causa era nell'ultimo passaggio del rendering, dove l'inquadratura zoomata perdeva la sua posizione sulla timeline e veniva disegnata prima del suo momento. Risolto, e coperto da un test perché non possa tornare in silenzio.",
+        "**Ora CupCat sa dirti quali voci ha, prima di spendere.** Non c'era modo di chiederlo: l'unico modo per scoprire che un nome di voce era sbagliato era pagare l'audio e leggere l'errore. Ora una domanda gratuita elenca le voci offline e tutte quelle del tuo account Higgsfield con l'identificativo esatto che serve a ciascuna — e dice chiaramente quando ciò che hai chiesto (una voce maschile italiana da narratore, per dire) non è tra quelle incluse, invece di lasciare che l'assistente continui a tirare a indovinare.",
+        "**La card di apertura/chiusura funziona di nuovo su un progetto che ha una traccia voce.** Metteva il suo sfondo sulla traccia che capitava in cima, e se quella era audio falliva e basta — due volte, senza dire perché, lasciando ogni volta sfondi inutilizzati nella libreria.",
+        "**Un titolo e il suo sottotitolo non si stampano più uno sopra l'altro.** Chiedere una riga a una certa altezza funzionava scrivendolo in un modo e veniva ignorato in silenzio nell'altro, impilando entrambe le righe al centro dell'inquadratura.",
+      ],
+    },
+  },
+  {
     version: "1.9.0",
     title: "\"Make mine like this one\" — and everything backwards",
     points: [
