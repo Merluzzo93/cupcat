@@ -1557,6 +1557,18 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   {
+    name: "list_voices",
+    description:
+      "WHO CAN SPEAK — call this BEFORE generate_speech or any paid TTS, never guess a voice. Returns the local Piper voices (free, offline, but only the two or three that are installed — no gender choice) AND the account's Higgsfield voices with their real voice_id UUIDs, gender, age and which TTS engines each one works with. voice_id is a UUID: passing a display name like \"Gideon\" makes a PAID job fail with 'Voice not found', which is only discovered after it is submitted. Narrow with gender/search/model. If no local voice fits what the user asked for (e.g. a male Italian narrator, which is NOT bundled), say so and offer the Higgsfield route instead of retrying generate_speech.",
+    inputSchema: obj({
+      gender: { type: "string", description: "Keep only Higgsfield voices of this gender ('male'/'female')." },
+      search: { type: "string", description: "Keep only Higgsfield voices whose name contains this." },
+      model: { type: "string", description: "Keep only Higgsfield voices usable with this TTS engine (elevenlabs, minimax, seed_speech, vibe_voice, cozy_voice)." },
+      local: { type: "boolean", description: "Only the offline Piper voices — skips the network call." },
+      limit: { type: "integer", description: "How many Higgsfield voices to return (default 60)." },
+    }),
+  },
+  {
     name: "reverse_video",
     description:
       "LOCAL reverse (free, offline): render a VIDEO played backwards — 'al contrario', 'reverse', 'rewind', 'boomerang', the pour-back / jump-back-up trick. Sound is reversed too when there is any. Long or high-resolution files are rendered in pieces automatically, so this does not run the machine out of memory the way a plain ffmpeg reverse does. Returns a NEW library video; the original is untouched. There is no 'reversed' clip property to set instead — the preview cannot play a clip backwards, so a reversed COPY is the only thing that looks the same in the preview and in the export.",

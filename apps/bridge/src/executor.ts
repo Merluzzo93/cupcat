@@ -53,7 +53,7 @@ import { suggestThumbnails } from "./thumbnails";
 import { echoedByPicture } from "./speechclips";
 import { type TaggedWindow, tagAudio, taggingAvailable } from "./audiotag";
 import { captionFor, findBeds, mergeEvents, pickEvent, sanitizeWords, speaksLanguage, type WindowEvent } from "./soundevents";
-import { generate, getModel, type GenerateOptions, type HfModel, listModels, uploadFile } from "./higgsfield";
+import { generate, getModel, type GenerateOptions, type HfModel, listModels, listVoices, uploadFile } from "./higgsfield";
 import { downloadToFile, guessExt, inferType, mediaPathFor, saveProject } from "./media";
 import { startRecording, stopRecording } from "./recorder";
 import { multicamCut } from "./multicam";
@@ -70,7 +70,7 @@ import { magnify, punchIn } from "./zoom";
 import { renderMotionGraphic } from "./motion";
 import { cachedDiarization, type Diarization, diarizeSpeakers, loadDiarization, overrideDiarization, speakerAt, type SpeakerTurn } from "./diarize";
 import { detectRetakes, knownLanguage, transcribe } from "./transcribe";
-import { synthesizeSpeech } from "./tts";
+import { localVoices, synthesizeSpeech } from "./tts";
 import { parseSubtitles, toSrt, translateSegments } from "./translate";
 import { importFromUrl } from "./url-import";
 import { appendMemory } from "./memory";
@@ -1710,7 +1710,14 @@ async function addMatte(ctx: BridgeContext, args: Args): Promise<ToolOut> {
     const entry: Args = { mediaRef: asset.id, startFrame: Math.max(0, Math.round(startFrame)), durationFrames: Math.max(1, Math.round(durationFrames)) };
     const trackIndex = numOpt(args.trackIndex);
     if (trackIndex !== undefined) entry.trackIndex = Math.round(trackIndex);
-    placed = ` ${TIMELINE_COMMANDS.add_clips(ctx.doc, { entries: [entry] }, "agent")}`;
+    try {
+      placed = ` ${TIMELINE_COMMANDS.add_clips(ctx.doc, { entries: [entry] }, "agent")}`;
+    } catch (e) {
+      // The asset exists only to be placed. Leaving it behind on a failed placement litters the
+      // library with unusable mattes — two of them turned up in one real project this way.
+      ctx.doc.removeAssets(new Set([asset.id]));
+      throw e;
+    }
   } else {
     ctx.doc.notifyChanged();
   }
@@ -1845,8 +1852,13 @@ async function addOpenerTool(ctx: BridgeContext, args: Args): Promise<ToolOut> {
   const notes: string[] = [];
   for (const layer of layers) {
     if (layer.type === "matte") {
+      // Its OWN track, like every other layer here. Dropping it on index 0 assumed the top track was
+      // a video track; the moment a narration track sat there, the opener died with "image is not
+      // compatible with audio track 0" — reported to the user as an unexplained backdrop failure.
+      doc.mutate("Opener backdrop track", "agent", () => doc.insertTrack(0, "video"));
       const r = await executeTool(ctx, "add_matte", { color: layer.color, startFrame: at, durationFrames: frames, trackIndex: 0 }, "agent");
-      if (r.isError) return fail("Could not create the backdrop for the opener.");
+      // Say what actually went wrong. The generic message hid the one sentence that named the cause.
+      if (r.isError) return fail(`Could not create the backdrop for the opener: ${r.content.map((c) => ("text" in c ? c.text : "")).join(" ").trim()}`);
     } else if (layer.type === "image") {
       const logo = doc.asset(layer.mediaRef);
       if (!logo) {
@@ -3768,6 +3780,8 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         return await recordStopTool(ctx, source);
       case "generate_speech":
         return await generateSpeechTool(ctx, args, source);
+      case "list_voices":
+        return await listVoicesTool(ctx, args);
       case "inspect_timeline":
         return await inspectTimeline(ctx.doc, args);
       case "timeline_view":
@@ -4274,6 +4288,73 @@ async function recordStopTool(ctx: BridgeContext, source: EditSource): Promise<T
   const dur = asset?.durationSeconds ? `${Math.round(asset.durationSeconds * 10) / 10}s` : `≈${rec.seconds}s`;
   const size = asset?.sourceWidth && asset.sourceHeight ? `, ${asset.sourceWidth}x${asset.sourceHeight}` : "";
   return ok(`Stopped the ${rec.source} recording (${dur}${size}) and imported it${asset ? ` as ${asset.id}` : ""} (${rec.path}).`);
+}
+
+/**
+ * list_voices — who can actually speak, before anyone pays to find out.
+ *
+ * Both catalogues at once, because "what voices do I have" is one question. The local ones are the
+ * two or three .onnx files on disk; the Higgsfield ones are a few hundred behind the account.
+ *
+ * The reason this exists is a session that spent twenty-two failed paid generations guessing what to
+ * put in voice_id — trying display names, engine names, anything — for a voice that was there the
+ * whole time under a UUID. Nothing in the model spec says voice_id is a UUID, and a wrong one is only
+ * refused after the job is submitted. One free call answers it.
+ */
+async function listVoicesTool(_ctx: BridgeContext, args: Args): Promise<ToolOut> {
+  const local = await localVoices();
+  const localOut = local.map((v) => ({
+    voice: v.file,
+    shorthand: v.language,
+    language: v.languageName || v.language,
+    speaker: v.dataset,
+    quality: v.quality,
+    use: `generate_speech with voice:"${v.language}" (or the full filename)`,
+  }));
+
+  const wantLocalOnly = args.local === true || strOpt(args.where) === "local";
+  const hosted = wantLocalOnly ? null : await listVoices();
+
+  // Everything, or narrowed — a few hundred voices is a lot to read when you want "a male narrator".
+  const gender = strOpt(args.gender)?.toLowerCase();
+  const q = strOpt(args.search)?.toLowerCase();
+  const engine = strOpt(args.model)?.toLowerCase();
+  const filtered = (hosted ?? []).filter(
+    (v) =>
+      (!gender || (v.gender ?? "").toLowerCase() === gender) &&
+      (!q || v.name.toLowerCase().includes(q)) &&
+      (!engine || v.supportedModels.some((m) => m.toLowerCase() === engine)),
+  );
+  const limit = Math.max(1, Math.min(500, Math.round(numOpt(args.limit) ?? 60)));
+
+  return okJson({
+    local: localOut,
+    localNote:
+      local.length === 0
+        ? "No local voices are installed."
+        : `generate_speech is free and offline but limited to these ${local.length}. There is no way to pick a gender: what is bundled is what there is. If none of them fits — a male Italian narrator, for instance — that is a reason to use generate_audio, not a reason to keep trying generate_speech.`,
+    ...(wantLocalOnly
+      ? {}
+      : hosted === null
+        ? {
+            higgsfield: [],
+            higgsfieldNote:
+              "Could not read the Higgsfield voice catalogue — sign in with `higgsfield auth login` and try again. Do NOT guess a voice_id: an unknown one is only rejected after the job is submitted.",
+          }
+        : {
+            higgsfield: filtered.slice(0, limit).map((v) => ({
+              voice_id: v.id,
+              name: v.name,
+              voice_type: v.voiceType,
+              ...(v.gender ? { gender: v.gender } : {}),
+              ...(v.age ? { age: v.age } : {}),
+              works_with: v.supportedModels,
+            })),
+            higgsfieldShown: `${Math.min(filtered.length, limit)} of ${filtered.length} matching (${hosted.length} in the account)`,
+            higgsfieldNote:
+              "voice_id is the UUID, NEVER the name — passing the name is what makes a paid job come back 'Voice not found'. Pass voice_id AND voice_type together to generate_audio, and set model to one of that voice's works_with entries.",
+          }),
+  });
 }
 
 // ── generate_speech (local Piper TTS — tts.ts owns the piper process) ──

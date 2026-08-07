@@ -561,7 +561,18 @@ function densifyClipTracks(c: Clip, fps: number): Clip {
   return { ...c, opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack };
 }
 
-function kenBurnsZoompan(c: Clip, W: number, H: number, fps: number): string | null {
+/**
+ * Zoom/pan keyframes as an ffmpeg zoompan, or null when this clip is not a zoom-in.
+ *
+ * ⚠️ zoompan REGENERATES timestamps. The chain has already run `setpts` to move the clip to its
+ * position on the timeline, and zoompan throws that away: its output starts at t=0 whatever went in.
+ * The overlay that composites this clip is gated on `enable=between(t, start, end)`, so the stream
+ * had run dry before its own window ever opened, and `eof_action=pass` let the black canvas through.
+ * The result was a finished export where every push-in was a black hole with the subtitles still on
+ * top — and a preview that looked perfect, because the preview composites in the browser and never
+ * touches ffmpeg. So the offset is put back at the end of this chain; nothing after it moves PTS.
+ */
+export function kenBurnsZoompan(c: Clip, W: number, H: number, fps: number): string | null {
   if (Math.abs(c.transform.width - 1) > 0.02 || Math.abs(c.transform.height - 1) > 0.02) return null;
   const sk = c.scaleTrack?.keyframes ?? [];
   const pk = c.positionTrack?.keyframes ?? [];
@@ -583,7 +594,9 @@ function kenBurnsZoompan(c: Clip, W: number, H: number, fps: number): string | n
   const pre = `scale=${W * ss}:${H * ss}:flags=bicubic,`;
   // Normalize to project fps first: zoompan d=1 emits one frame per input frame, so a clip whose
   // source fps differs from the project would otherwise change duration.
-  return `fps=${fpsArg(fps)},${pre}zoompan=z='${z}':x='${x}':y='${y}':d=1:s=${W}x${H}:fps=${fpsArg(fps)}`;
+  // The trailing setpts is not cosmetic — see the note above; without it the clip renders black.
+  const at = c.startFrame / fps;
+  return `fps=${fpsArg(fps)},${pre}zoompan=z='${z}':x='${x}':y='${y}':d=1:s=${W}x${H}:fps=${fpsArg(fps)},setpts=PTS-STARTPTS+${at.toFixed(6)}/TB`;
 }
 
 /** Static/animated geometry the base chain must apply: flips + rotation (degrees → radians).

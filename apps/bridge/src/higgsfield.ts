@@ -32,6 +32,83 @@ export async function listModels(kind?: "image" | "video"): Promise<HfModel[]> {
   }
 }
 
+// ── voices ───────────────────────────────────────────────────────────────────
+//
+// The CLI has no voices command, and text2speech_v2 declares voice_id as a free string with no enum
+// — so there is nothing to read a voice catalogue from, and a wrong id is only discovered by paying
+// for a job that comes back "Voice not found". That is not hypothetical: it cost one session
+// twenty-two failed generations, guessing names, while the voice the user wanted existed all along
+// under a UUID. The catalogue does exist on the same API the CLI authenticates against, so ask it.
+
+const HF_API = process.env.CUPCAT_HIGGSFIELD_API ?? "https://fnf.higgsfield.ai";
+
+export interface HfVoice {
+  /** What goes in `voice_id`. A UUID — never the display name, which is what gets guessed wrong. */
+  id: string;
+  name: string;
+  /** What goes in `voice_type`: a built-in voice or one of the user's own. */
+  voiceType: "preset" | "element";
+  gender: string | null;
+  age: string | null;
+  /** TTS engines this voice works with — `model` must be one of these or the job fails. */
+  supportedModels: string[];
+  previewUrl: string | null;
+}
+
+async function authToken(): Promise<string | null> {
+  const { stdout, code } = await run(HIGGSFIELD_BIN, ["auth", "token"]);
+  const t = stdout.trim();
+  return code === 0 && t !== "" ? t : null;
+}
+
+/**
+ * Every voice this account can use, built-in and custom.
+ *
+ * Paged: the endpoint carries separate cursors for the user's own voices and the presets, and
+ * returns at most a page of each, so it is walked to the end. There are a couple of hundred in
+ * total, which is small enough to fetch whole and far cheaper than one wrong generation.
+ */
+export async function listVoices(): Promise<HfVoice[] | null> {
+  const token = await authToken();
+  if (!token) return null;
+  const out: HfVoice[] = [];
+  const seen = new Set<string>();
+  let query = "?size=100";
+  for (let page = 0; page < 20; page++) {
+    let body: { items?: unknown[]; has_more?: boolean; user_cursor?: unknown; preset_cursor?: unknown };
+    try {
+      const res = await fetch(`${HF_API}/agents/voices${query}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return out.length > 0 ? out : null;
+      body = (await res.json()) as typeof body;
+    } catch {
+      return out.length > 0 ? out : null;
+    }
+    for (const raw of body.items ?? []) {
+      const v = raw as Record<string, unknown>;
+      const id = typeof v.id === "string" ? v.id : "";
+      if (id === "" || seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        name: typeof v.name === "string" ? v.name : id,
+        voiceType: v.type === "element" ? "element" : "preset",
+        gender: typeof v.gender === "string" ? v.gender : null,
+        age: typeof v.age === "string" ? v.age : null,
+        supportedModels: Array.isArray(v.supported_models) ? (v.supported_models as unknown[]).filter((x): x is string => typeof x === "string") : [],
+        previewUrl: typeof v.source === "string" && v.source !== "" ? v.source : null,
+      });
+    }
+    if (body.has_more !== true) break;
+    const parts = ["size=100"];
+    if (body.user_cursor !== null && body.user_cursor !== undefined) parts.push(`user_cursor=${encodeURIComponent(String(body.user_cursor))}`);
+    if (body.preset_cursor !== null && body.preset_cursor !== undefined) parts.push(`preset_cursor=${encodeURIComponent(String(body.preset_cursor))}`);
+    const next = `?${parts.join("&")}`;
+    if (next === query) break; // the cursors stopped moving; stop rather than loop
+    query = next;
+  }
+  return out;
+}
+
 /** Per-model parameter spec (defaults, enums) — `higgsfield model get <job_set_type> --json`. */
 export async function getModel(jobSetType: string): Promise<unknown> {
   const { stdout, code } = await run(HIGGSFIELD_BIN, ["model", "get", jobSetType, "--json"]);

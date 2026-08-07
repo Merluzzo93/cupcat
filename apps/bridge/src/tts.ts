@@ -26,6 +26,55 @@ export interface SpeechOptions {
   speed?: number;
 }
 
+export interface LocalVoice {
+  /** What goes in generate_speech's `voice`. The bare filename works; so does the language shorthand. */
+  file: string;
+  /** 'it', 'en', … — the shorthand that resolves to this voice when it is the first for its language. */
+  language: string;
+  languageName: string;
+  /** The speaker the model was trained on. Piper carries no gender field, so this is all there is. */
+  dataset: string;
+  quality: string;
+}
+
+/**
+ * The voices actually installed, read off disk.
+ *
+ * Without this the only way to find out what is available is to ask for one that is not and read the
+ * error — which is how a session went looking for an Italian male narrator that does not exist here,
+ * through several wrong guesses. Two bundled voices is a small enough truth to just state.
+ */
+export async function localVoices(): Promise<LocalVoice[]> {
+  let names: string[] = [];
+  try {
+    names = (await readdir(PIPER_VOICES_DIR)).filter((n) => n.toLowerCase().endsWith(".onnx"));
+  } catch {
+    return [];
+  }
+  const out: LocalVoice[] = [];
+  for (const file of names.sort()) {
+    let language = file.split("_")[0] ?? "";
+    let languageName = "";
+    let dataset = "";
+    let quality = "";
+    try {
+      const meta = (await Bun.file(join(PIPER_VOICES_DIR, `${file}.json`)).json()) as {
+        language?: { family?: string; name_english?: string };
+        dataset?: string;
+        audio?: { quality?: string };
+      };
+      language = meta.language?.family ?? language;
+      languageName = meta.language?.name_english ?? "";
+      dataset = meta.dataset ?? "";
+      quality = meta.audio?.quality ?? "";
+    } catch {
+      /* a voice without its .json still works; the filename is enough to name it */
+    }
+    out.push({ file, language, languageName, dataset, quality });
+  }
+  return out;
+}
+
 /** Map a voice request to a concrete .onnx model path, with errors that say exactly what to fix. */
 async function resolveVoiceModel(voice: string): Promise<string> {
   if (voice.toLowerCase().endsWith(".onnx")) {

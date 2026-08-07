@@ -889,16 +889,19 @@ export function addTexts(doc: EditorDocument, args: Args, source: EditSource = "
       if (!["left", "center", "right"].includes(alignment)) throw new CommandError(`entries[${idx}]: invalid alignment`);
       style.alignment = alignment as "left" | "center" | "right";
     }
-    const tf = e.transform as Args | undefined;
+    // Position: nested under `transform`, but ALSO accepted flat on the entry. Putting centerY
+    // beside fontSize is the obvious guess, and silently dropping it stacks a heading and its
+    // subtitle in the dead centre of the frame, printed through each other — a result that reads as
+    // a rendering fault rather than an ignored argument. Nested wins when both are given.
+    const tf = (e.transform ?? {}) as Args;
     const transform = defaultTransform();
     transform.width = 0.8;
     transform.height = 0.2;
-    if (tf && typeof tf === "object") {
-      transform.centerX = num(tf, "centerX") ?? transform.centerX;
-      transform.centerY = num(tf, "centerY") ?? transform.centerY;
-      transform.width = num(tf, "width") ?? transform.width;
-      transform.height = num(tf, "height") ?? transform.height;
-    }
+    const place = (k: "centerX" | "centerY" | "width" | "height") => num(tf, k) ?? num(e, k);
+    transform.centerX = place("centerX") ?? transform.centerX;
+    transform.centerY = place("centerY") ?? transform.centerY;
+    transform.width = place("width") ?? transform.width;
+    transform.height = place("height") ?? transform.height;
     const styleRanges = parseStyleRanges(e.styleRanges, `entries[${idx}]`) ?? undefined;
     return { trackId, content, startFrame, durationFrames, style, transform, styleRanges };
   });
