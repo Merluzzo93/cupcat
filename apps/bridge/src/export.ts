@@ -33,53 +33,17 @@ import { exportsDir, FFMPEG_BIN, FFPROBE_BIN } from "./config";
 import { channelBalanceFix, disablePlacebo, ensureDvSdrProxy, hasAlphaMode, hdrInputFix, imageScopes, inputColorFix, isHdrSource, isVulkanFailure, probeMedia } from "./ffmpeg";
 import { ensurePathMaskPng } from "./pathmask";
 import { consumeKilled, run } from "./proc";
-
-const FONT = process.env.CUPCAT_FONT ?? "C:/Windows/Fonts/arialbd.ttf";
-
-// Map a text clip's fontName (from the editor's font picker) to a Windows system font file.
-// Every path below was verified to ship with Windows 10/11; fontFileFor still stats the file at
-// first use so a stripped-down install degrades to the default font instead of failing drawtext.
-const FONT_FILES: Record<string, string> = {
-  "Helvetica-Bold": "C:/Windows/Fonts/arialbd.ttf",
-  Arial: "C:/Windows/Fonts/arial.ttf",
-  Georgia: "C:/Windows/Fonts/georgia.ttf",
-  "Times New Roman": "C:/Windows/Fonts/times.ttf",
-  Verdana: "C:/Windows/Fonts/verdana.ttf",
-  "Trebuchet MS": "C:/Windows/Fonts/trebuc.ttf",
-  "Courier New": "C:/Windows/Fonts/cour.ttf",
-  Impact: "C:/Windows/Fonts/impact.ttf",
-  "Comic Sans MS": "C:/Windows/Fonts/comic.ttf",
-  "Segoe UI": "C:/Windows/Fonts/segoeui.ttf",
-  "Segoe UI Semibold": "C:/Windows/Fonts/seguisb.ttf",
-  Bahnschrift: "C:/Windows/Fonts/bahnschrift.ttf",
-  Candara: "C:/Windows/Fonts/Candara.ttf",
-  Consolas: "C:/Windows/Fonts/consola.ttf",
-  Constantia: "C:/Windows/Fonts/constan.ttf",
-  Corbel: "C:/Windows/Fonts/corbel.ttf",
-};
-// Existence cache: one stat per font file per process — the export must never hand ffmpeg a
-// missing fontfile (drawtext aborts the whole render).
-const fontFileSeen = new Map<string, boolean>();
-function fontFileFor(name?: string): string {
-  const mapped = name ? FONT_FILES[name] : undefined;
-  if (!mapped) return FONT;
-  let ok = fontFileSeen.get(mapped);
-  if (ok === undefined) {
-    try {
-      ok = existsSync(mapped);
-    } catch {
-      ok = false;
-    }
-    fontFileSeen.set(mapped, ok);
-  }
-  return ok ? mapped : FONT;
-}
+import { toSrt } from "./translate";
+import { fontFileFor, wrapText } from "./textmetrics";
 
 export interface ExportResult {
   ok: boolean;
   path?: string;
   durationSeconds?: number;
   error?: string;
+  /** An NLE handoff also writes the timeline's captions beside it; this is that file, when there
+   * were any. Reported to the user so they know it is there to import. */
+  sidecarPath?: string;
 }
 
 function s(n: number): string {
@@ -125,7 +89,80 @@ function assTimestamp(t: number): string {
   const sec = Math.floor((cs % 6000) / 100);
   return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`;
 }
-const assEscape = (t: string): string => t.replace(/[{}\\]/g, "").replace(/\r?\n/g, " ");
+// A line break the user typed is a line they meant: it becomes ASS's own break (\N), not a space.
+// Flattening it here is why a two-line title played as two lines and exported as one long one.
+// The backslash strip runs first, so the \N added afterwards survives.
+export const assEscape = (t: string): string => t.replace(/[{}\\]/g, "").replace(/\r?\n/g, "\\N");
+
+/**
+ * The captions already on the timeline, as an SRT written next to an NLE handoff.
+ *
+ * An edit sent to Premiere or Resolve arrived as picture and sound with the subtitles left behind,
+ * and retyping them is the last thing anyone wants to do twice. These are the cues that are already
+ * there — nothing is transcribed, so writing them costs nothing and an XML export stays instant.
+ * Returns the file written, or null when the timeline has no captions to carry.
+ */
+export async function writeCaptionSidecar(doc: EditorDocument, xmlPath: string): Promise<string | null> {
+  const fps = doc.project.timeline.fps || 30;
+  const cues = doc.project.timeline.tracks
+    .flatMap((t) => t.clips)
+    .filter((c) => c.mediaType === "text" && c.captionGroupId && (c.textContent ?? "").trim() !== "")
+    .sort((a, b) => a.startFrame - b.startFrame)
+    .map((c) => ({
+      startSeconds: c.startFrame / fps,
+      endSeconds: Math.max(c.startFrame + 1, clipEndFrame(c)) / fps,
+      text: (c.textContent ?? "").trim(),
+    }));
+  if (cues.length === 0) return null;
+  const srtPath = xmlPath.replace(/\.[^.]+$/, "") + ".srt";
+  try {
+    await Bun.write(srtPath, toSrt(cues));
+  } catch {
+    return null; // the handoff itself is written; a missing sidecar is not worth failing it over
+  }
+  return srtPath;
+}
+
+/**
+ * Where a text block sits, and how its lines line up inside it.
+ *
+ * Two separate settings, and both were wrong for anything on more than one line. drawtext stacks
+ * lines flush left whatever the clip says, so a centred caption's short second line hung off to the
+ * left of the first — measured at line centres of 300 and 640 on a 1280 frame. And the block was
+ * always centred on centerX, so left- and right-aligned text sat in the middle of the frame in the
+ * file while the preview had it against the edge of its box. `text_align` settles the lines; `x`
+ * puts the block against the same box edge the preview uses.
+ *
+ * `x` is an ffmpeg expression because only ffmpeg knows how wide the rendered text came out.
+ */
+export function textPlacement(c: Clip, frameWidth: number): { x: string; textAlign: "L" | "C" | "R" } {
+  const centreX = Math.round(c.transform.centerX * frameWidth);
+  const half = Math.round(((c.transform.width || 1) * frameWidth) / 2);
+  switch (c.textStyle?.alignment ?? "center") {
+    case "left":
+      return { x: `${centreX - half}`, textAlign: "L" };
+    case "right":
+      return { x: `${centreX + half}-text_w`, textAlign: "R" };
+    default:
+      return { x: `${centreX}-text_w/2`, textAlign: "C" };
+  }
+}
+
+/**
+ * The exact text drawtext is handed for a text clip.
+ *
+ * Two things used to go wrong here, and both read as a broken renderer rather than what they were.
+ * Newlines were flattened to spaces, so a title written on two lines exported as one. And drawtext
+ * does not wrap at all, so anything longer than the frame simply ran off both edges — measured at
+ * 1276 px of text across a 1280 px frame — while the preview had been wrapping it inside the clip's
+ * box the whole time. Both are decided here now, against that same box, on the font's real widths.
+ */
+export function drawnText(c: Clip, frameWidth: number): string {
+  const fontSizePx = Math.round(c.textStyle?.fontSize ?? 96);
+  const maxWidthPx = Math.max(1, Math.round((c.transform.width || 1) * frameWidth));
+  const fontFile = fontFileFor(c.textStyle?.fontName);
+  return wrapText(c.textContent ?? "", { fontFile, fontSizePx, maxWidthPx }).lines.join("\n");
+}
 
 /** One ASS file for a group of karaoke caption clips: each clip is a Dialogue whose words carry
  * \k timing, so the word being spoken is tinted highlightColor (PrimaryColour) while the rest of
@@ -1018,10 +1055,12 @@ export async function buildVisualGraph(doc: EditorDocument, hdr = false, tlOverr
       const cx = Math.round(c.transform.centerX * W);
       const cy = Math.round(c.transform.centerY * H);
       const txtPath = join(exportsDir, `_text_${dt}.txt`);
-      await Bun.write(txtPath, c.textContent.replace(/\r?\n/g, " "));
+      const fontFile = fontFileFor(ts?.fontName);
+      await Bun.write(txtPath, drawnText(c, W));
       const next = `t${dt}`;
+      const place = textPlacement(c, W);
       filters.push(
-        `[${vlabel}]drawtext=fontfile=${ffPath(fontFileFor(ts?.fontName))}:textfile=${ffPath(txtPath)}:fontsize=${fontsize}:fontcolor=${ffColor(ts?.color ?? "#ffffff")}:x=${cx}-text_w/2:y=${cy}-text_h/2:shadowcolor=black@0.5:shadowx=2:shadowy=2:enable=between(t\\,${t0s}\\,${t1s})[${next}]`,
+        `[${vlabel}]drawtext=fontfile=${ffPath(fontFile)}:textfile=${ffPath(txtPath)}:fontsize=${fontsize}:fontcolor=${ffColor(ts?.color ?? "#ffffff")}:text_align=${place.textAlign}:x=${place.x}:y=${cy}-text_h/2:shadowcolor=black@0.5:shadowx=2:shadowy=2:enable=between(t\\,${t0s}\\,${t1s})[${next}]`,
       );
       vlabel = next;
       dt++;
@@ -1653,6 +1692,27 @@ async function exportNleXml(doc: EditorDocument, outName: string): Promise<Expor
       .map((t) => `${indent}<track>\n${t.clips.map((c) => clipItem(c, `${indent}  `)).filter(Boolean).join("\n")}\n${indent}</track>`)
       .join("\n");
 
+  // Markers go with the cut. Everything CupCat worked out about the footage — the chapters
+  // auto_chapters found, anything marked by hand — lived only inside CupCat, so handing the edit to
+  // Premiere threw all of it away and left the editor to find those points again. In xmeml a
+  // sequence marker is a name, a comment and a frame; out = -1 means a point rather than a range.
+  const markerXml = (indent: string): string =>
+    (tl.markers ?? [])
+      .filter((m) => Number.isFinite(m.frame) && m.frame >= 0)
+      .sort((a, b) => a.frame - b.frame)
+      .map((m) =>
+        [
+          `${indent}<marker>`,
+          `${indent}  <name>${xmlEscape(m.note?.trim() || "Marker")}</name>`,
+          `${indent}  <comment>${xmlEscape(m.color ?? "")}</comment>`,
+          `${indent}  <in>${Math.round(m.frame)}</in>`,
+          `${indent}  <out>-1</out>`,
+          `${indent}</marker>`,
+        ].join("\n"),
+      )
+      .join("\n");
+  const markers = markerXml("    ");
+
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE xmeml>
 <xmeml version="5">
@@ -1660,7 +1720,7 @@ async function exportNleXml(doc: EditorDocument, outName: string): Promise<Expor
     <name>${xmlEscape(doc.project.name)}</name>
     <duration>${total}</duration>
     ${rateXml}
-    <media>
+${markers ? `${markers}\n` : ""}    <media>
       <video>
         <format><samplecharacteristics><width>${tl.width}</width><height>${tl.height}</height><rate><timebase>${timebase}</timebase></rate></samplecharacteristics></format>
 ${trackXml("video", "        ")}
@@ -1681,7 +1741,8 @@ ${trackXml("audio", "        ")}
   } catch (e) {
     return { ok: false, error: `Failed to write XML to ${outPath}: ${e instanceof Error ? e.message : String(e)}` };
   }
-  return { ok: true, path: outPath, durationSeconds: total / fps };
+  const sidecarPath = (await writeCaptionSidecar(doc, outPath)) ?? undefined;
+  return { ok: true, path: outPath, durationSeconds: total / fps, sidecarPath };
 }
 
 /** FCPXML 1.11 — the modern interchange for Final Cut Pro and DaVinci Resolve (the FCP7 xmeml
@@ -1848,6 +1909,20 @@ async function exportFcpXml(doc: EditorDocument, outName: string): Promise<Expor
     }
   }
 
+  // Markers ride along with the cut, anchored to whatever spine item covers them.
+  //
+  // Chapters found by auto_chapters and anything marked by hand used to stop at CupCat's door: the
+  // handoff carried geometry and nothing else, so the editor opening the project in Resolve or Final
+  // Cut had to find every one of those points again. A marker's `start` is in its parent's local
+  // time, the same coordinate space connected clips use, so it goes through localOffset like they do.
+  // FCPXML's content model puts markers AFTER anchored items, which is where these land.
+  for (const m of (tl.markers ?? []).filter((x) => Number.isFinite(x.frame) && x.frame >= 0).sort((a, b) => a.frame - b.frame)) {
+    const frame = Math.round(m.frame);
+    if (frame > total) continue; // a marker past the end of the cut has nothing to attach to
+    const slot = anchorSlot(frame);
+    slot.children.push(`<marker start="${t(localOffset(slot, frame))}" duration="${t(1)}" value="${xmlEscape(m.note?.trim() || "Marker")}"/>`);
+  }
+
   const IND = "            "; // spine-item indent
   const spineLines: string[] = [];
   for (const slot of slots) {
@@ -1900,7 +1975,8 @@ ${spineLines.join("\n")}
   } catch (e) {
     return { ok: false, error: `Failed to write FCPXML to ${outPath}: ${e instanceof Error ? e.message : String(e)}` };
   }
-  return { ok: true, path: outPath, durationSeconds: total / fps };
+  const sidecarPath = (await writeCaptionSidecar(doc, outPath)) ?? undefined;
+  return { ok: true, path: outPath, durationSeconds: total / fps, sidecarPath };
 }
 
 /** Render composited frames at the given project-frame numbers → base64 PNGs (downscaled). */
@@ -1924,7 +2000,7 @@ export async function renderTimelineView(
   const COLS = Math.max(6, Math.min(18, Math.round(dur / 2)));
   const xOf = (t: number) => Math.round((Math.max(0, Math.min(dur, t)) / dur) * W);
   const esc = (str: string) => str.replace(/['":%\\]/g, "").slice(0, 16);
-  const FF = ffPath(FONT);
+  const FF = ffPath(fontFileFor());
   const parts: string[] = [];
   const layers: string[] = [];
   if (hasVideo) {

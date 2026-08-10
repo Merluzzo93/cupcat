@@ -26,6 +26,12 @@ rebuilding one.
 - **Line endings vary per file** in this repo. A replacement anchored on the wrong ones fails
   silently, and `git commit -a` then commits nothing.
 - **No export without a check.** `quality_report` exists for this; the agent instructions require it.
+- **Three engines draw CupCat's text and none of them agree by default** — the browser in the
+  preview, ffmpeg's `drawtext` for plain text, libass for karaoke and rich text. drawtext does not
+  wrap at all and stacks lines flush left; libass wraps at a width of its own. So line breaks are
+  decided in `textmetrics.ts`, from the font file's advance widths, and written into the text as real
+  newlines. Never let a renderer choose: that is how a caption came to run 1276 px across a 1280 px
+  frame while the preview showed it neatly wrapped.
 - **Set `CUPCAT_PROJECT_DIR` before running anything that calls a tool.** Tools that add an asset end
   with `saveProject`, which writes `project.json` in the *user's real* project folder — a scratch
   script driving `executeTool` overwrites whatever project is there. Point it at a temp directory.
@@ -34,7 +40,7 @@ rebuilding one.
 
 ```
 bun run sidecars                       # 402 bundled engine files, pinned + hash-verified
-bun run typecheck && bun test          # 772 tests; all must pass
+bun run typecheck && bun test          # 813 tests; all must pass
 bun run build:web && bun run build:bridge
 cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
 cd apps/desktop && npx @tauri-apps/cli@latest build      # needs cargo AND node on PATH

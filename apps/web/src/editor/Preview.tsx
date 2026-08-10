@@ -467,7 +467,10 @@ function Layer({
       fontFamily: FONT_CSS[ts?.fontName ?? ""] ?? "Arial, Helvetica, sans-serif",
       fontSize: `${(ts?.fontSize ?? 96) * scale}px`,
       fontWeight: 700,
-      lineHeight: 1.1,
+      // The font's own line height, which is what ffmpeg's drawtext stacks lines by — measured at
+      // 1.146x for Arial Bold against the 1.1 that used to be forced here. A multi-line title was
+      // drawn tighter in the preview than in the file; following the font makes both agree.
+      lineHeight: "normal",
       display: "flex",
       alignItems: "center",
       justifyContent: align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center",

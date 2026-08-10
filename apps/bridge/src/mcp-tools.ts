@@ -1337,7 +1337,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "add_captions",
     description:
-      "Auto-caption spoken audio: transcribes and places styled caption clips on a new track. The reliable path for 'caption this'. Omit clipIds to auto-pick the track with the most speech. Set karaoke:true for the TikTok/Reels style: short lines stay on screen and the word being SPOKEN is tinted (highlightColor, default yellow) in perfect sync — in the preview and burned into exports. Default is one cue per spoken phrase (no highlight). Pass language when you know it (e.g. 'it') — auto-detect can mislabel the first words.",
+      "Auto-caption spoken audio: transcribes and places styled caption clips on a new track. The reliable path for 'caption this'. Omit clipIds to auto-pick the track with the most speech. Set karaoke:true for the TikTok/Reels style: short lines stay on screen and the word being SPOKEN is tinted (highlightColor, default yellow) in perfect sync — in the preview and burned into exports. Default is one cue per spoken phrase (no highlight). Pass language when you know it (e.g. 'it') — auto-detect can mislabel the first words. Cues are laid out to fit the frame: lines are broken on the font's real widths to at most two lines, and a sentence too long for two becomes two cues sharing its span, so a caption never runs off the edges.",
     inputSchema: obj({
       clipIds: { type: "array", items: { type: "string" }, description: "Optional. Audio/video clips to caption." },
       language: { type: "string", description: "Optional BCP-47 language (e.g. 'it', 'en'). Recommended when known." },
@@ -1709,7 +1709,8 @@ export const TOOL_DEFS: ToolDef[] = [
       format: {
         type: "string",
         enum: ["mp4_h264", "mp4_h265", "mp4_av1", "hdr_hevc", "prores", "nle_xml", "fcpxml", "lossless"],
-        description: "mp4_h264 (default), mp4_h265, mp4_av1 (SVT-AV1 10-bit — ~30% smaller than H.265, slower encode), hdr_hevc (true HDR — HLG BT.2020 10-bit HEVC; needs an all-HDR timeline), prores (.mov), nle_xml (FCP7 XML for Premiere/Resolve), fcpxml (FCPXML 1.11 for Final Cut/Resolve), or lossless (stream copy — instant, zero loss, pure-cut timelines of one source only).",
+        description:
+          "mp4_h264 (default), mp4_h265, mp4_av1 (SVT-AV1 10-bit — ~30% smaller than H.265, slower encode), hdr_hevc (true HDR — HLG BT.2020 10-bit HEVC; needs an all-HDR timeline), prores (.mov), nle_xml (FCP7 XML for Premiere/Resolve), fcpxml (FCPXML 1.11 for Final Cut/Resolve), or lossless (stream copy — instant, zero loss, pure-cut timelines of one source only). Both XML handoffs also carry the timeline's MARKERS (chapters from auto_chapters, anything added with add_marker) and write the timeline's captions as an .srt beside the XML, so the edit arrives in the other program with what CupCat worked out rather than just the cuts.",
       },
       quality: {
         type: "string",

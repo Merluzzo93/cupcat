@@ -70,6 +70,7 @@ import { magnify, punchIn } from "./zoom";
 import { renderMotionGraphic } from "./motion";
 import { cachedDiarization, type Diarization, diarizeSpeakers, loadDiarization, overrideDiarization, speakerAt, type SpeakerTurn } from "./diarize";
 import { detectRetakes, knownLanguage, transcribe } from "./transcribe";
+import { CAPTION_BOX, fontFileFor, layoutCaption, measureLine, wrapText } from "./textmetrics";
 import { localVoices, synthesizeSpeech } from "./tts";
 import { parseSubtitles, toSrt, translateSegments } from "./translate";
 import { importFromUrl } from "./url-import";
@@ -686,7 +687,7 @@ function makeCaption(
     textContent: text,
     textStyle: { fontName: style.fontName, fontSize: style.fontSize, color: style.color, alignment: "center", highlightColor: style.highlightColor },
     karaokeWords,
-    transform: { centerX: cx, centerY: cy, width: 0.9, height: 0.2, rotation: 0, flipHorizontal: false, flipVertical: false },
+    transform: { centerX: cx, centerY: cy, width: CAPTION_BOX, height: 0.2, rotation: 0, flipHorizontal: false, flipVertical: false },
   });
 }
 
@@ -814,6 +815,9 @@ async function addCaptionsTool(doc: EditorDocument, args: Args): Promise<ToolOut
     color: strOpt(args.color) ?? "#ffffff",
     highlightColor: karaoke ? (strOpt(args.highlightColor) ?? "#FFD400") : undefined,
   };
+  // The box every cue has to fit, in pixels of the finished frame, and the face it is measured in.
+  const boxPx = Math.max(1, Math.round(CAPTION_BOX * doc.timeline.width));
+  const fontFile = fontFileFor(style.fontName);
   const captions: Clip[] = [];
 
   for (const id of clipIds) {
@@ -834,6 +838,11 @@ async function addCaptionsTool(doc: EditorDocument, args: Args): Promise<ToolOut
       const cues: KaraokeCueWords[] = [];
       let cur: KaraokeCueWords = [];
       let prevEndSec = 0;
+      // A karaoke cue is one line — the words are tinted in place, so it cannot be wrapped without
+      // breaking the timing. It gets closed on width instead: long words simply make for shorter
+      // cues, which is the right trade and keeps the line inside the box.
+      const tooWide = (words: KaraokeCueWords, next: string): boolean =>
+        measureLine([...words.map((x) => x.word), next].join(" "), fontFile, style.fontSize) > boxPx;
       for (const w of tr.words) {
         const sf = sourceToProjectFrame(c, w.start, fps);
         if (sf == null) {
@@ -842,11 +851,12 @@ async function addCaptionsTool(doc: EditorDocument, args: Args): Promise<ToolOut
           continue;
         }
         const ef = sourceToProjectFrame(c, w.end, fps) ?? sf + Math.round(fps / 4);
-        if (cur.length && (cur.length >= n || w.start - prevEndSec > 1.2)) {
+        const word = applyCase(w.word, textCase);
+        if (cur.length && (cur.length >= n || w.start - prevEndSec > 1.2 || tooWide(cur, word))) {
           cues.push(cur);
           cur = [];
         }
-        cur.push({ word: applyCase(w.word, textCase), sf, ef: Math.max(sf + 1, ef) });
+        cur.push({ word, sf, ef: Math.max(sf + 1, ef) });
         prevEndSec = w.end;
       }
       if (cur.length) cues.push(cur);
@@ -860,7 +870,18 @@ async function addCaptionsTool(doc: EditorDocument, args: Args): Promise<ToolOut
         const ef = sourceToProjectFrame(c, seg.end, fps) ?? sf + fps;
         const text = applyCase(seg.text, strOpt(args.textCase));
         if (!text) continue;
-        captions.push(makeCaption(text, sf, Math.max(1, ef - sf), groupId, style, cx, cy));
+        // One spoken segment can be more than one cue when it is too long to sit on two lines; the
+        // segment's own span is shared between them by length, so the words stay under the voice.
+        const span = Math.max(1, ef - sf);
+        const pieces = layoutCaption(text, { fontFile, fontSizePx: style.fontSize, maxWidthPx: boxPx });
+        const chars = pieces.reduce((sum, p) => sum + p.replace(/\n/g, " ").length, 0) || 1;
+        let at = sf;
+        pieces.forEach((piece, i) => {
+          const last = i === pieces.length - 1;
+          const dur = last ? sf + span - at : Math.max(1, Math.round((span * piece.replace(/\n/g, " ").length) / chars));
+          captions.push(makeCaption(piece, at, Math.max(1, dur), groupId, style, cx, cy));
+          at += dur;
+        });
       }
     }
   }
@@ -1235,10 +1256,16 @@ async function importCaptionsTool(doc: EditorDocument, args: Args): Promise<Tool
   const cx = numOpt(args.centerX) ?? 0.5;
   const cy = numOpt(args.centerY) ?? 0.9;
   const groupId = newId("cap");
+  // The file's cue boundaries are the author's and are left alone — only the line breaks inside a
+  // cue are redone, so a line written for a wider frame does not run off this one. Breaks already
+  // in the file are kept: wrapText treats them as hard breaks.
+  const boxPx = Math.max(1, Math.round(CAPTION_BOX * doc.timeline.width));
+  const fontFile = fontFileFor(style.fontName);
   const captions = cues.map((c) => {
     const sf = Math.round(c.startSeconds * fps);
     const ef = Math.max(sf + 1, Math.round(c.endSeconds * fps));
-    return makeCaption(c.text, sf, ef - sf, groupId, style, cx, cy);
+    const text = wrapText(c.text, { fontFile, fontSizePx: style.fontSize, maxWidthPx: boxPx }).lines.join("\n");
+    return makeCaption(text, sf, ef - sf, groupId, style, cx, cy);
   });
   doc.mutate("Import Captions", "agent", () => {
     const idx = doc.insertTrack(0, "video");
@@ -3935,7 +3962,11 @@ async function runTool(ctx: BridgeContext, name: string, rawArgs: Args, source: 
         const res = await exportTimeline(ctx.doc, name, fmt, quality);
         if (!res.ok) return fail(res.error ?? "Export failed");
         const outName = res.path ? res.path.split(/[\\/]/).pop()! : name;
-        return ok(`Exported "${outName}" (${res.durationSeconds?.toFixed(1)}s). Download: http://127.0.0.1:${BRIDGE_PORT}/exports/${outName}`);
+        // An NLE handoff writes the timeline's captions beside it — worth saying, or it goes unnoticed.
+        const sidecar = res.sidecarPath ? ` The captions went with it, as "${res.sidecarPath.split(/[\\/]/).pop()}".` : "";
+        return ok(
+          `Exported "${outName}" (${res.durationSeconds?.toFixed(1)}s).${sidecar} Download: http://127.0.0.1:${BRIDGE_PORT}/exports/${outName}`,
+        );
       }
       case "punch_in":
         return ok(
@@ -4229,6 +4260,8 @@ async function translateCaptionsTool(ctx: BridgeContext, args: Args): Promise<To
     color: "#ffffff",
     highlightColor: karaoke ? (strOpt(args.highlightColor) ?? "#FFD400") : undefined,
   };
+  const boxPx = Math.max(1, Math.round(CAPTION_BOX * doc.timeline.width));
+  const fontFile = fontFileFor(style.fontName);
   const groupId = newId("cap");
   let captions: Clip[];
   if (karaoke) {
@@ -4242,13 +4275,36 @@ async function translateCaptionsTool(ctx: BridgeContext, args: Args): Promise<To
       const words = proportionalCueWords(translated[i]!, cues[i]!.startFrame, cues[i]!.endFrame);
       // Break lines by count only: synthetic word times are contiguous, so there are no real
       // pauses inside a phrase to break on — phrase boundaries themselves force the break.
-      for (let base = 0; base < words.length; base += n) chunked.push(words.slice(base, base + n));
+      // Width closes a cue early as well: a translation is often longer than what was said, and a
+      // karaoke line cannot be wrapped without losing the word timing.
+      let cur: KaraokeCueWords = [];
+      for (const w of words) {
+        const wide = cur.length > 0 && measureLine([...cur.map((x) => x.word), w.word].join(" "), fontFile, style.fontSize) > boxPx;
+        if (cur.length >= n || wide) {
+          chunked.push(cur);
+          cur = [];
+        }
+        cur.push(w);
+      }
+      if (cur.length > 0) chunked.push(cur);
     }
     captions = karaokeCueSpecs(chunked, fps).map((spec) =>
       makeCaption(spec.text, spec.startFrame, spec.durationFrames, groupId, style, 0.5, 0.9, spec.words),
     );
   } else {
-    captions = cues.map((c, i) => makeCaption(translated[i]!, c.startFrame, Math.max(1, c.endFrame - c.startFrame), groupId, style, 0.5, 0.9));
+    // A translated phrase keeps its own span — the timing came from the speech, not from us — so an
+    // over-long one is wrapped rather than split.
+    captions = cues.map((c, i) =>
+      makeCaption(
+        wrapText(translated[i]!, { fontFile, fontSizePx: style.fontSize, maxWidthPx: boxPx }).lines.join("\n"),
+        c.startFrame,
+        Math.max(1, c.endFrame - c.startFrame),
+        groupId,
+        style,
+        0.5,
+        0.9,
+      ),
+    );
   }
   if (captions.length === 0) return fail("Translation produced no caption text to place.");
   doc.mutate("Translate Captions", "agent", () => {

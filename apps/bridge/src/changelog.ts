@@ -31,6 +31,27 @@ export function localise(e: ChangelogEntry, lang: string): LocalisedEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.10.0",
+    title: "Subtitles behave like subtitles, and the handoff takes your notes with it",
+    points: [
+      "**Long captions no longer run off the edges of the exported video.** A spoken sentence was drawn as one straight run of text — measured at 1276 pixels across a 1280-pixel frame, touching both sides — while the preview had been wrapping it neatly inside its box the whole time. CupCat now decides the line breaks itself, from the real letter widths of the font you chose: at most two lines, and a sentence too long for two becomes two captions sharing its moment, the way a subtitler would do it.",
+      "**A line break you typed is a line break you get.** Text written on two lines played as two lines and exported as one long one, because the export flattened every newline into a space. Titles, cards and hand-written subtitles now come out of the render exactly as they look while you are editing.",
+      "**Text on more than one line is now aligned properly.** The second line of a centred caption used to hang off to the left of the first instead of sitting under the middle of it, and left- or right-aligned text was drawn in the middle of the frame whatever you had chosen.",
+      "**Handing the edit to Premiere, Final Cut or Resolve now takes your markers with it.** The chapters CupCat found and anything you marked yourself stayed behind in CupCat, so whoever opened the project in another program had to find all those points again. They now travel in the XML, at the right frame, with their names.",
+      "**And your subtitles go with it too**, as a standard .srt written next to the XML — nothing to retype, nothing to re-transcribe, and it costs no extra time because they are the captions already on your timeline.",
+    ],
+    it: {
+      title: "I sottotitoli si comportano da sottotitoli, e il passaggio di consegne porta con sé i tuoi appunti",
+      points: [
+        "**I sottotitoli lunghi non escono più fuori dai bordi del video esportato.** Una frase parlata veniva disegnata come un'unica riga dritta — misurata a 1276 pixel su un fotogramma di 1280, che toccava entrambi i lati — mentre l'anteprima la mandava a capo ordinatamente dentro il suo riquadro. Ora è CupCat a decidere dove spezzare le righe, sulle larghezze vere delle lettere del font che hai scelto: al massimo due righe, e una frase troppo lunga per starci diventa due sottotitoli che si dividono il suo momento, come farebbe un sottotitolista.",
+        "**Un a-capo che scrivi tu è un a-capo che ottieni.** Un testo scritto su due righe si vedeva su due righe e usciva su una sola, perché l'export appiattiva ogni ritorno a capo in uno spazio. Titoli, cartelli e sottotitoli scritti a mano ora escono dal render esattamente come li vedi mentre monti.",
+        "**Il testo su più righe ora è allineato come si deve.** La seconda riga di un sottotitolo centrato se ne stava spostata a sinistra invece che sotto il centro della prima, e il testo allineato a sinistra o a destra veniva disegnato in mezzo al fotogramma comunque.",
+        "**Passare il montaggio a Premiere, Final Cut o Resolve ora porta con sé i tuoi marcatori.** I capitoli trovati da CupCat e tutto quello che avevi segnato restavano dentro CupCat, e chi apriva il progetto altrove doveva ritrovarsi quei punti da capo. Ora viaggiano nell'XML, al fotogramma giusto e col loro nome.",
+        "**E ci vanno anche i sottotitoli**, come un normale .srt scritto accanto all'XML — niente da riscrivere e niente da ritrascrivere, e non costa tempo in più perché sono i sottotitoli già presenti sulla tua timeline.",
+      ],
+    },
+  },
+  {
     version: "1.9.1",
     title: "Zooms no longer export as black",
     points: [
