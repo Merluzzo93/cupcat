@@ -1704,7 +1704,9 @@ async function exportNleXml(doc: EditorDocument, outName: string): Promise<Expor
         [
           `${indent}<marker>`,
           `${indent}  <name>${xmlEscape(m.note?.trim() || "Marker")}</name>`,
-          `${indent}  <comment>${xmlEscape(m.color ?? "")}</comment>`,
+          // Left empty on purpose: xmeml has nowhere to put a marker's colour, and a hex string
+          // showing up as the comment on every marker in Premiere is noise, not information.
+          `${indent}  <comment></comment>`,
           `${indent}  <in>${Math.round(m.frame)}</in>`,
           `${indent}  <out>-1</out>`,
           `${indent}</marker>`,

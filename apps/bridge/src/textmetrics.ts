@@ -195,9 +195,16 @@ const FALLBACK_EM = 0.55;
 export function measureLine(text: string, fontFile: string, fontSizePx: number): number {
   const m = metrics(fontFile);
   if (!m) return text.length * fontSizePx * FALLBACK_EM;
-  let units = 0;
-  for (const ch of text) units += m.advance(m.glyph(ch.codePointAt(0)!));
-  return (units / m.unitsPerEm) * fontSizePx;
+  try {
+    let units = 0;
+    for (const ch of text) units += m.advance(m.glyph(ch.codePointAt(0)!));
+    return (units / m.unitsPerEm) * fontSizePx;
+  } catch {
+    // The lookups above read the font lazily, so a truncated or malformed table only shows up here,
+    // long after the file parsed. Estimating is a worse answer than measuring; taking an export down
+    // over a font is a worse answer than either.
+    return text.length * fontSizePx * FALLBACK_EM;
+  }
 }
 
 export interface WrapOptions {

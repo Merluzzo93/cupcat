@@ -167,3 +167,14 @@ describe("against what ffmpeg actually draws", () => {
     60_000,
   );
 });
+
+describe("a font that parses but then misbehaves", () => {
+  test("a truncated font file measures instead of taking the export down", async () => {
+    // Real header, nothing behind it: the tables parse, the lookups then read past the end.
+    const real = new Uint8Array(await Bun.file(ARIAL_BOLD).arrayBuffer());
+    const cut = join(tmpdir(), "cupcat-truncated-font.ttf");
+    await Bun.write(cut, real.slice(0, Math.min(real.length, 4096)));
+    expect(() => measureLine("qualcosa da misurare", cut, 48)).not.toThrow();
+    expect(measureLine("qualcosa da misurare", cut, 48)).toBeGreaterThan(0);
+  });
+});
