@@ -9,6 +9,7 @@ import { installLogCapture } from "./feedback";
 import { listModels, loginWithUrl } from "./higgsfield";
 import { ensureDirs, loadProject } from "./media";
 import { runCli } from "./cli";
+import { sweepScratch } from "./scratch";
 import { startServer } from "./server";
 import { APPLY_FLAG, cleanupAfterUpdate, installRoot, runApplyHelper } from "./delta";
 import { exitWithParent } from "./proc";
@@ -46,6 +47,8 @@ cleanupAfterUpdate(); // drop the previous copies of anything a finished update 
 // its own file — which is what makes an installer fail halfway through.
 exitWithParent(installRoot() !== null);
 await ensureDirs();
+// Yesterday's working files, if any survived. Nothing waits on this.
+void sweepScratch().then((n) => n > 0 && console.log(`[scratch] removed ${n} stale working file(s) from exports/`));
 const project = await loadProject();
 const doc = new EditorDocument(project);
 

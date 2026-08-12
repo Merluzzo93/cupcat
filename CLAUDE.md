@@ -35,12 +35,25 @@ rebuilding one.
 - **Set `CUPCAT_PROJECT_DIR` before running anything that calls a tool.** Tools that add an asset end
   with `saveProject`, which writes `project.json` in the *user's real* project folder — a scratch
   script driving `executeTool` overwrites whatever project is there. Point it at a temp directory.
+- **Never pick a TCP port by hand.** Windows reserves whole blocks of the ephemeral range for Hyper-V
+  and WSL (`netsh interface ipv4 show excludedportrange protocol=tcp`), and a bind inside one comes
+  back WSAEACCES. `cdp.ts` used to gamble on 19200–19699; on a machine reserving 19146–19661 it failed
+  nine launches in ten, and every tool that needs a rendered page — motion graphics, transitions,
+  `capture_frame`, `inspect_timeline` — reported "Edge headless unavailable". Ask for port 0 and read
+  back what you were given.
+- **When ffmpeg fails, the last thing it complains about is rarely the cause.** A filtergraph that
+  never builds surfaces as the *audio encoder* giving up ("Could not open encoder before EOF").
+  `CUPCAT_DUMP_FFMPEG=1` prints the exact argv, which is the fastest way to the real fault;
+  `ffmpegFailureReason` is what picks the honest line out of the stderr for the user.
+- **Working files go in `exports/` and must be sweepable.** Anything temporary gets one of the
+  prefixes in `scratch.ts`; nothing else in that folder is ever deleted, because the rest is the
+  user's rendered video.
 
 ## Building and releasing
 
 ```
 bun run sidecars                       # 402 bundled engine files, pinned + hash-verified
-bun run typecheck && bun test          # 814 tests; all must pass
+bun run typecheck && bun test          # 833 tests; all must pass
 bun run build:web && bun run build:bridge
 cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
 cd apps/desktop && npx @tauri-apps/cli@latest build      # needs cargo AND node on PATH

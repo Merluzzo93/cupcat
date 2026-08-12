@@ -31,6 +31,25 @@ export function localise(e: ChangelogEntry, lang: string): LocalisedEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.10.1",
+    title: "Exports that used to die, and an assistant that can see again",
+    points: [
+      "**A flash, a glow or any light effect no longer kills the export.** If a layer set to a blend mode was scaled bigger than the frame — which is exactly what a flash is — the render stopped before it started and left a file of zero bytes. It now places the layer where you put it and trims what hangs over the edge, the way the preview always showed it.",
+      "**When a render does fail, it now tells you why.** The message quoted whichever part of ffmpeg gave up last, which was usually the sound: you would read \"could not open the audio encoder\" for a fault that had nothing to do with audio. CupCat now finds the line that actually explains it and puts that first.",
+      "**The assistant can look at your timeline again.** On most Windows machines the small browser CupCat uses to draw things could not start, because it insisted on a fixed range of network ports that Windows reserves for itself. Everything that needs it failed with \"unavailable\": motion graphics, transitions, the picture of your timeline, and the assistant's own ability to see a frame — which is why it would sometimes go quiet mid-conversation. It now asks the system for a free port instead of guessing one.",
+      "**CupCat cleans up after itself.** Rendering leaves working files in your project's exports folder — one per subtitle, per export, plus a browser profile per motion graphic — and nothing ever deleted them. One project had 5,397 of them and 47 MB of abandoned profiles sitting next to the finished videos. They are now swept away once they are old enough that no render could still be using them. Your own exports are never touched.",
+    ],
+    it: {
+      title: "Export che morivano, e un assistente che torna a vedere",
+      points: [
+        "**Un flash, un bagliore o qualsiasi effetto luminoso non fa più fallire l'export.** Se un livello impostato su un metodo di fusione veniva ingrandito oltre il fotogramma — che è esattamente com'è fatto un flash — il render si fermava prima di iniziare e lasciava un file da zero byte. Ora il livello viene messo dove l'hai messo tu e ciò che sborda viene tagliato, come l'anteprima ha sempre mostrato.",
+        "**E quando un render fallisce davvero, ora ti dice perché.** Il messaggio riportava l'ultimo pezzo di ffmpeg che si era arreso, che di solito era l'audio: ti ritrovavi a leggere \"non riesco ad aprire l'encoder audio\" per un guasto che con l'audio non c'entrava niente. Ora CupCat trova la riga che spiega davvero il problema e la mette per prima.",
+        "**L'assistente torna a guardare la tua timeline.** Su quasi tutti i PC Windows il piccolo browser che CupCat usa per disegnare non riusciva ad avviarsi, perché pretendeva un intervallo fisso di porte di rete che Windows tiene per sé. Tutto ciò che ne ha bisogno falliva con \"non disponibile\": grafiche animate, transizioni, l'immagine della timeline e la capacità stessa dell'assistente di vedere un fotogramma — ed è il motivo per cui ogni tanto si zittiva a metà conversazione. Ora chiede al sistema una porta libera invece di indovinarla.",
+        "**CupCat si pulisce dietro.** Il rendering lascia file di lavoro nella cartella exports del progetto — uno per sottotitolo, per ogni export, più un profilo del browser per ogni grafica animata — e nessuno li cancellava mai. Un progetto ne aveva 5.397, con 47 MB di profili abbandonati accanto ai video finiti. Ora vengono spazzati via quando sono abbastanza vecchi da non poter più servire a nessun render. I tuoi export non si toccano.",
+      ],
+    },
+  },
+  {
     version: "1.10.0",
     title: "Subtitles behave like subtitles, and the handoff takes your notes with it",
     points: [

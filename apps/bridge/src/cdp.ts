@@ -80,18 +80,24 @@ export async function renderHtmlFrames(
     console.error("[cdp] msedge.exe not found — motion graphics need Microsoft Edge (present on all supported Windows)");
     return null;
   }
-  const port = 19200 + Math.floor(Math.random() * 500);
-  const profile = join(exportsDir, `_mgprofile_${port}`);
+  const profile = join(exportsDir, `_mgprofile_${Date.now()}_${Math.floor(Math.random() * 1000)}`);
   await mkdir(opts.outDir, { recursive: true });
   const proc = Bun.spawn(
     [
       edge,
-      "--headless=new",
+      "--headless",
       "--disable-gpu",
       "--hide-scrollbars",
       "--no-first-run",
       "--disable-extensions",
-      `--remote-debugging-port=${port}`,
+      // Port 0 = "pick one that works, and tell me which". Choosing the number ourselves is what
+      // broke this: CupCat used to gamble on 19200-19699, and Windows reserves whole blocks of that
+      // range for Hyper-V and WSL. On a machine where 19146-19661 was excluded, bind() came back
+      // WSAEACCES nine times out of ten, the debugger never started, and every tool that needs a
+      // rendered page — motion graphics, transitions, the timeline picture, capture_frame — failed
+      // with "Edge headless unavailable". The assistant, unable to see the timeline at all, then
+      // stalled. Edge writes the port it actually got into DevToolsActivePort in its profile.
+      "--remote-debugging-port=0",
       `--user-data-dir=${profile}`,
       `--window-size=${opts.width},${opts.height}`,
       "about:blank",
@@ -99,16 +105,31 @@ export async function renderHtmlFrames(
     { stdout: "ignore", stderr: "ignore" },
   );
   try {
-    // The debugger endpoint takes a moment to come up; poll /json/list for the page target.
+    // First the port Edge chose, then the page target on it.
+    const portFile = join(profile, "DevToolsActivePort");
+    let port = 0;
+    for (let i = 0; i < 60 && port === 0; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        const first = (await Bun.file(portFile).text()).split("\n")[0]?.trim() ?? "";
+        if (/^\d+$/.test(first)) port = Number(first);
+      } catch {
+        /* not written yet */
+      }
+    }
+    if (port === 0) {
+      console.error("[cdp] Edge never reported a debugging port — it could not start its devtools server");
+      return null;
+    }
     let wsUrl = "";
     for (let i = 0; i < 60 && !wsUrl; i++) {
-      await new Promise((r) => setTimeout(r, 250));
       try {
         const list = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { type: string; webSocketDebuggerUrl?: string }[];
         wsUrl = list.find((t) => t.type === "page")?.webSocketDebuggerUrl ?? "";
       } catch {
         /* not up yet */
       }
+      if (!wsUrl) await new Promise((r) => setTimeout(r, 250));
     }
     if (!wsUrl) {
       console.error("[cdp] Edge debugger endpoint never came up");
@@ -153,6 +174,11 @@ export async function renderHtmlFrames(
     }
   } finally {
     proc.kill();
+    // Wait for it to actually be gone. Windows will not delete a directory a live process still has
+    // files open in, and rm's failure was being swallowed — which is how two dead browser profiles,
+    // 37 MB of them, came to be sitting in a user's project folder. The sweep in scratch.ts clears
+    // any that still escape (a wedged Edge, a killed engine), so this can stay best-effort.
+    await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 5_000))]);
     await rm(profile, { recursive: true, force: true }).catch(() => {});
   }
 }

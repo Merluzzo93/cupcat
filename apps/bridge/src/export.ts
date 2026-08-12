@@ -33,6 +33,7 @@ import { exportsDir, FFMPEG_BIN, FFPROBE_BIN } from "./config";
 import { channelBalanceFix, disablePlacebo, ensureDvSdrProxy, hasAlphaMode, hdrInputFix, imageScopes, inputColorFix, isHdrSource, isVulkanFailure, probeMedia } from "./ffmpeg";
 import { ensurePathMaskPng } from "./pathmask";
 import { consumeKilled, run } from "./proc";
+import { sweepScratch } from "./scratch";
 import { toSrt } from "./translate";
 import { fontFileFor, wrapText } from "./textmetrics";
 
@@ -146,6 +147,55 @@ export function textPlacement(c: Clip, frameWidth: number): { x: string; textAli
     default:
       return { x: `${centreX}-text_w/2`, textAlign: "C" };
   }
+}
+
+/**
+ * Put a blend-mode layer on a canvas-sized frame at (x, y), clipping whatever falls outside.
+ *
+ * `pad` alone cannot do this. It only ever GROWS a frame, so a layer scaled bigger than the canvas —
+ * or hanging off any edge — asked it to pad to a smaller size at a negative offset, which ffmpeg
+ * rejects with EINVAL and takes the whole export down with it. What the user then read was "Could
+ * not open encoder before EOF" from the AUDIO encoder, because a filtergraph that fails to build
+ * delivers no frames to anything. Measured on a real project: a 3648x2052 layer at x=-864 on a
+ * 1920x1080 canvas, and an export that produced a zero-byte file.
+ *
+ * The overflow is cropped away first, which is what the preview shows anyway — the frame clips the
+ * layer. The crop is written in ffmpeg's own expressions rather than worked out here: rotation and
+ * manual crops have already changed the frame by this point, so `iw`/`ih` are the only honest source
+ * for what is actually arriving. Every clamp is total, so no geometry can produce an invalid filter,
+ * and the whole thing is a no-op for a layer that already fits.
+ */
+export function blendFitFilter(x: number, y: number, W: number, H: number): string {
+  const px = Math.max(0, Math.round(x));
+  const py = Math.max(0, Math.round(y));
+  const cx = Math.max(0, -Math.round(x));
+  const cy = Math.max(0, -Math.round(y));
+  const crop =
+    `crop=w='max(1,min(iw-${cx},${Math.max(1, W - px)}))':h='max(1,min(ih-${cy},${Math.max(1, H - py)}))'` +
+    `:x='min(${cx},iw-1)':y='min(${cy},ih-1)'`;
+  return `${crop},pad=${W}:${H}:${px}:${py}:color=black@0.0`;
+}
+
+/**
+ * Why ffmpeg gave up, in the words that actually say it.
+ *
+ * ffmpeg reports the CAUSE first and then a cascade: every encoder and muxer thread announces that
+ * it is terminating, and the last lines are always the same generic wreckage. Reporting the tail
+ * handed the user "Could not open encoder before EOF" from the AAC encoder for a fault that was a
+ * bad crop three hundred lines earlier — a message that sends anyone looking in the wrong place.
+ *
+ * So the first line that names a real problem wins, and the tail is kept after it for context.
+ */
+export function ffmpegFailureReason(stderr: string): string {
+  const lines = stderr.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "");
+  // The cascade, in the order ffmpeg emits it — never the cause, always the consequence.
+  const noise =
+    /Terminating thread|Task finished with error code|Conversion failed|Nothing was written into output file|^frame=|Error (initializing|while filtering|opening output)|^\s*Last message repeated/i;
+  const cause = lines.find(
+    (l) => !noise.test(l) && /(Invalid|invalid|failed|Failed|error|Error|not (found|supported)|No such|Unable|cannot|Cannot)/.test(l),
+  );
+  const tail = lines.slice(-4).join("\n");
+  return cause && !tail.includes(cause) ? `${cause}\n${tail}` : tail;
 }
 
 /**
@@ -992,7 +1042,10 @@ export async function buildVisualGraph(doc: EditorDocument, hdr = false, tlOverr
         // Place the clip's layer onto a canvas-sized transparent frame at its position, THEN blend
         // that against the accumulated composite — ffmpeg's `overlay` filter only does plain alpha
         // compositing, so a custom blend mode needs the two inputs to be the same size first.
-        filters.push(`[${vout}]pad=${W}:${H}:${ov.x}:${ov.y}:color=black@0.0[${posOut}]`);
+        //
+        // blendFitFilter, not a bare `pad`: see the note there — a layer bigger than the canvas made
+        // `pad` invalid and killed the export with an error that pointed at the audio encoder.
+        filters.push(`[${vout}]${blendFitFilter(Number(ov.x), Number(ov.y), W, H)}[${posOut}]`);
         filters.push(`[${vlabel}][${posOut}]blend=all_mode=${blendFf}:enable='between(t\\,${t0s}\\,${t1s})'[${oout}]`);
       } else {
         filters.push(`[${vlabel}][${vout}]overlay=x=${ov.x}:y=${ov.y}:enable=between(t\\,${t0s}\\,${t1s}):eof_action=pass[${oout}]`);
@@ -1519,6 +1572,8 @@ export async function exportTimeline(
   if (format === "nle_xml") return exportNleXml(doc, outName);
   if (format === "fcpxml") return exportFcpXml(doc, outName);
   if (format === "lossless") return exportLossless(doc, outName);
+  // The other place working files pile up: this one is about to write a fresh set of them.
+  void sweepScratch();
   const hdr = format === "hdr_hevc";
   if (hdr) {
     const refusal = await hdrExportRefusal(doc);
@@ -1561,6 +1616,7 @@ export async function exportTimeline(
     outPath,
   ];
 
+  if (process.env.CUPCAT_DUMP_FFMPEG) console.error("FFMPEG ARGS >>>\n" + args.join(" \n"));
   // Tagged so a cancel request (HTTP /export/cancel or the cancel_export tool) can kill this run.
   const { stderr, code } = await run(FFMPEG_BIN, args, { tag: "export" });
   if (code !== 0) {
@@ -1578,7 +1634,7 @@ export async function exportTimeline(
       disablePlacebo(`export failed: ${stderr.split("\n").findLast((l) => /vulkan|placebo/i.test(l)) ?? "vulkan error"}`);
       return exportTimeline(doc, outName, format, quality, true);
     }
-    return { ok: false, error: `ffmpeg exited ${code}: ${stderr.split("\n").slice(-8).join("\n")}` };
+    return { ok: false, error: `ffmpeg exited ${code}: ${ffmpegFailureReason(stderr)}` };
   }
   return { ok: true, path: outPath, durationSeconds: g.durSec };
 }
