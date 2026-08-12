@@ -238,3 +238,19 @@ jobs:
             apps/desktop/src-tauri/target/release/delta
           retention-days: 7
           compression-level: 0
+
+      # The same manifest and spare parts, without the installer, as an artifact of their own.
+      # An in-app update publishes only these — a few tens of MB — but they used to arrive welded to a
+      # 990 MB installer, because `gh run download -p` filters which artifacts come down, not what is
+      # inside one. Downloading a gigabyte to upload 100 MB of it is the kind of tax that gets paid
+      # every single release, so it is worth one extra upload here.
+      - name: Upload just the update payload
+        if: env.DO_INSTALLER == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: CupCat-${{ steps.found.outputs.version }}-update
+          path: |
+            apps/desktop/manifests/${{ steps.found.outputs.version }}.json
+            apps/desktop/src-tauri/target/release/delta
+          retention-days: 7
+          compression-level: 0
