@@ -31,6 +31,21 @@ export function localise(e: ChangelogEntry, lang: string): LocalisedEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.10.2",
+    title: "Updates that survive a bad connection",
+    points: [
+      "**An update no longer gives up the moment the connection hiccups.** GitHub serves the files from a different place than it serves the answer about which files exist, and that place drops connections — measured here at roughly one request in two on an ordinary evening. One drop was enough to lose the whole thing: sometimes 100 MB into a download, and sometimes silently, with CupCat simply telling you there was no update. It now tries again a few times, waiting a little longer each time, and only then admits defeat.",
+      "**A moment of bad signal no longer hides updates until you restart.** If the check failed once, the answer \"there is nothing new\" was remembered for as long as CupCat stayed open, so the update stayed invisible even after the connection came back.",
+    ],
+    it: {
+      title: "Aggiornamenti che sopravvivono a una connessione ballerina",
+      points: [
+        "**Un aggiornamento non si arrende più al primo singhiozzo della connessione.** GitHub serve i file da un posto diverso da quello che risponde su quali file esistono, e quel posto lascia cadere le connessioni — misurato qui a circa una richiesta su due, in una sera qualunque. Bastava una caduta per perdere tutto: a volte 100 MB dopo l'inizio del download, a volte in silenzio, con CupCat che si limitava a dirti che non c'erano aggiornamenti. Ora riprova qualche volta, aspettando un po' di più ogni volta, e solo allora si arrende.",
+        "**E un attimo di linea storta non nasconde più gli aggiornamenti fino al riavvio.** Se il controllo falliva una volta, la risposta «non c'è niente di nuovo» restava buona per tutto il tempo in cui CupCat rimaneva aperto, e l'aggiornamento restava invisibile anche a connessione tornata.",
+      ],
+    },
+  },
+  {
     version: "1.10.1",
     title: "Exports that used to die, and an assistant that can see again",
     points: [

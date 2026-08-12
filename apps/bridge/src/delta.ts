@@ -217,21 +217,62 @@ interface GhRelease {
 
 const releases = new Map<string, GhRelease | null>();
 
+/** How many times a request gets to fail before we believe it. */
+export const FETCH_ATTEMPTS = 4;
+
+/**
+ * fetch, but a dropped connection is not the end of the update.
+ *
+ * GitHub serves release assets from a different edge than its API, and that edge resets connections:
+ * measured here, roughly one request in two to `releases/download/...` came back ECONNRESET while
+ * the very same URL fetched by curl was fine, and the next attempt seconds later succeeded. One
+ * reset used to cost the whole update — either silently ("no update available", because every error
+ * on the check path is swallowed) or 100 MB into a download. So: a few attempts with a growing wait,
+ * and only for transport failures. A 404 is an answer and is returned as one.
+ *
+ * `sleep` is injectable so the tests do not actually wait.
+ */
+export async function fetchRetry(
+  url: string,
+  init: RequestInit & { timeoutMs?: number },
+  attempts = FETCH_ATTEMPTS,
+  sleep: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
+): Promise<Response> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    // A fresh deadline per attempt. One signal shared across all of them would be spent by the
+    // first slow try, and every retry after it would fail instantly on an already-aborted signal.
+    const { timeoutMs, ...rest } = init;
+    try {
+      return await fetch(url, timeoutMs ? { ...rest, signal: AbortSignal.timeout(timeoutMs) } : rest);
+    } catch (e) {
+      last = e;
+      // An abort the CALLER asked for — a cancelled update — is a decision, not a flaky network.
+      // A timeout of our own is retried: that is precisely the case worth retrying.
+      if (init.signal?.aborted) throw e;
+      if (i < attempts - 1) await sleep(500 * 2 ** i);
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last));
+}
+
 /** A release by tag ("v1.7.22"), cached for the life of the process. */
 async function getRelease(tag: string): Promise<GhRelease | null> {
   const hit = releases.get(tag);
   if (hit !== undefined) return hit;
   let rel: GhRelease | null = null;
   try {
-    const res = await fetch(`${GITHUB_API}/repos/${GITHUB_REPO}/releases/tags/${tag}`, {
+    const res = await fetchRetry(`${GITHUB_API}/repos/${GITHUB_REPO}/releases/tags/${tag}`, {
       headers: { accept: "application/vnd.github+json", "user-agent": "CupCat-Updater" },
-      signal: AbortSignal.timeout(10_000),
+      timeoutMs: 10_000,
     });
     if (res.ok) rel = (await res.json()) as GhRelease;
   } catch {
     /* offline — no delta, the installer link still works */
   }
-  releases.set(tag, rel);
+  // Only a real answer is worth remembering: caching a network failure for the life of the process
+  // would turn one bad moment into "no updates exist" until CupCat is restarted.
+  if (rel) releases.set(tag, rel);
   return rel;
 }
 
@@ -245,7 +286,7 @@ export async function fetchManifest(tag: string): Promise<Manifest | null> {
   const url = assetUrl(rel, MANIFEST_ASSET);
   if (!url) return null;
   try {
-    const res = await fetch(url, { headers: { "user-agent": "CupCat-Updater" }, signal: AbortSignal.timeout(20_000) });
+    const res = await fetchRetry(url, { headers: { "user-agent": "CupCat-Updater" }, timeoutMs: 20_000 });
     if (!res.ok) return null;
     const m = (await res.json()) as Manifest;
     return Array.isArray(m?.files) && typeof m.version === "string" ? m : null;
@@ -336,8 +377,12 @@ function stagedPath(root: string, f: ManifestFile): string {
  *
  * Nothing is put in place here — a half-downloaded update must be indistinguishable from no update
  * at all, so everything lands in .update/staged and only moves once all of it has arrived intact.
+ *
+ * Exported so the download half of an update can be exercised on its own, against a real release and
+ * a real copy of an install: `applyUpdate` ends by quitting the process, which is not something a
+ * check can watch.
  */
-async function stage(root: string, plan: UpdatePlan, onProgress: (p: UpdateProgress) => void): Promise<void> {
+export async function stageUpdate(root: string, plan: UpdatePlan, onProgress: (p: UpdateProgress) => void): Promise<void> {
   const dir = join(updateDir(root), "staged");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -356,30 +401,49 @@ async function stage(root: string, plan: UpdatePlan, onProgress: (p: UpdateProgr
     const tag = tagOf(f.since || plan.hostTag);
     const url = assetUrl(releases.get(tag) ?? null, f.asset);
     if (!url) throw new Error(`${f.path} is not published in ${tag}`);
-    const res = await fetch(url, { headers: { "user-agent": "CupCat-Updater" }, signal: AbortSignal.timeout(600_000) });
-    if (!res.ok || !res.body) throw new Error(`couldn't download ${f.path} (${res.status})`);
 
-    const dest = stagedPath(root, f);
-    mkdirSync(dirname(dest), { recursive: true });
-    const h = createHash("sha256");
-    const w = Bun.file(dest).writer();
-    let written = 0;
-    try {
-      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-        h.update(chunk);
-        w.write(chunk);
-        written += chunk.length;
-        bytesDone += chunk.length;
-        tick(f.path);
+    // One attempt at one file, all of it: a connection that drops 90 MB into a 99 MB download throws
+    // from inside the body loop, which no amount of retrying the *request* would have caught.
+    const once = async (): Promise<void> => {
+      const res = await fetch(url, { headers: { "user-agent": "CupCat-Updater" }, signal: AbortSignal.timeout(600_000) });
+      if (!res.ok || !res.body) throw new Error(`couldn't download ${f.path} (${res.status})`);
+      const dest = stagedPath(root, f);
+      mkdirSync(dirname(dest), { recursive: true });
+      const h = createHash("sha256");
+      const w = Bun.file(dest).writer();
+      let written = 0;
+      try {
+        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+          h.update(chunk);
+          w.write(chunk);
+          written += chunk.length;
+          bytesDone += chunk.length;
+          tick(f.path);
+        }
+      } finally {
+        await w.end();
       }
-    } finally {
-      await w.end();
+      // A truncated download that happens to stop on a chunk boundary is still a truncated download,
+      // and a proxy that returns a login page instead of a binary is not one either. Both are caught
+      // here, before anything is allowed near the install.
+      if (written !== f.size) throw new Error(`${f.path} arrived ${written} bytes, expected ${f.size}`);
+      if (h.digest("hex") !== f.sha256) throw new Error(`${f.path} did not match its published checksum`);
+    };
+
+    const startBytes = bytesDone;
+    let failure: unknown;
+    for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt++) {
+      bytesDone = startBytes; // a retry re-downloads from the beginning; the bar must say so too
+      try {
+        await once();
+        failure = undefined;
+        break;
+      } catch (e) {
+        failure = e;
+        if (attempt < FETCH_ATTEMPTS - 1) await Bun.sleep(500 * 2 ** attempt);
+      }
     }
-    // A truncated download that happens to stop on a chunk boundary is still a truncated download,
-    // and a proxy that returns a login page instead of a binary is not one either. Both are caught
-    // here, before anything is allowed near the install.
-    if (written !== f.size) throw new Error(`${f.path} arrived ${written} bytes, expected ${f.size}`);
-    if (h.digest("hex") !== f.sha256) throw new Error(`${f.path} did not match its published checksum`);
+    if (failure) throw failure;
     filesDone += 1;
     tick(f.path, true);
   }
@@ -430,7 +494,7 @@ export async function applyUpdate(plan: UpdatePlan, onProgress: (p: UpdateProgre
     return;
   }
   try {
-    await stage(root, plan, onProgress);
+    await stageUpdate(root, plan, onProgress);
     writeFileSync(join(updateDir(root), "pending.json"), JSON.stringify({ version: plan.version, files: plan.files }, null, 2));
     onProgress({ phase: "staged", bytesDone: plan.bytes, bytesTotal: plan.bytes, filesDone: plan.files.length, filesTotal: plan.files.length });
     onProgress({ phase: "restarting", bytesDone: plan.bytes, bytesTotal: plan.bytes, filesDone: plan.files.length, filesTotal: plan.files.length });

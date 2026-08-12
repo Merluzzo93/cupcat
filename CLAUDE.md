@@ -53,7 +53,7 @@ rebuilding one.
 
 ```
 bun run sidecars                       # 402 bundled engine files, pinned + hash-verified
-bun run typecheck && bun test          # 833 tests; all must pass
+bun run typecheck && bun test          # 840 tests; all must pass
 bun run build:web && bun run build:bridge
 cp dist-bridge/cupcat-bridge.exe apps/desktop/src-tauri/binaries/cupcat-bridge-x86_64-pc-windows-msvc.exe
 cd apps/desktop && npx @tauri-apps/cli@latest build      # needs cargo AND node on PATH
@@ -70,6 +70,10 @@ those same bytes: `manifest.ts <version> --installer <signed installer>`.
 
 Releases are meant to be built by `.github/workflows/release.yml` on GitHub-hosted runners — not
 because CI is tidier, but because SignPath refuses to sign anything else. See `docs/SIGNING.md`.
+
+**Commit `apps/desktop/manifests/<version>.json` after publishing.** It is what the next build
+compares against, and CI cannot push it — the copy in the artifact is the only one. Three releases
+went out comparing against 1.8.1 because nobody brought it back.
 
 Then `gh release create v<version>` with the installer, `manifest.json` and the `file__*` assets, and
 update the version on the site. A small fix can instead go **into the existing release**

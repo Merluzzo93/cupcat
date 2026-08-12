@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assetNameFor, changedFiles, hashFile, localFiles, swapStaged, type Manifest, type ManifestFile } from "./delta";
+import { assetNameFor, changedFiles, FETCH_ATTEMPTS, fetchRetry, hashFile, localFiles, swapStaged, type Manifest, type ManifestFile } from "./delta";
 
 let root = "";
 
@@ -154,5 +154,91 @@ describe("putting the files in place", () => {
     root = makeInstall({ "cupcat.exe": "app" });
     expect(swapStaged(root, [])).toBeNull();
     expect(readFileSync(join(root, "cupcat.exe"), "utf8")).toBe("app");
+  });
+});
+
+// ---------------------------------------------------------------------------- flaky networks
+
+// GitHub serves release assets from a different edge than its API, and that edge resets connections:
+// measured on a real machine while publishing 1.10.1, roughly one request in two to
+// `releases/download/...` came back ECONNRESET, while curl fetching the very same URL was fine and
+// the next attempt seconds later succeeded. Before this, one reset cost the entire update — and on
+// the check path it cost it SILENTLY, because every error there is swallowed into "no update".
+describe("fetchRetry", () => {
+  const real = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = real;
+  });
+
+  /** A fetch that fails the first `failures` times, then answers. Records what it was given. */
+  function flaky(failures: number, error = new Error("The socket connection was closed unexpectedly")) {
+    const calls: RequestInit[] = [];
+    let n = 0;
+    globalThis.fetch = ((_url: string, init: RequestInit = {}) => {
+      calls.push(init);
+      if (n++ < failures) return Promise.reject(error);
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    }) as unknown as typeof fetch;
+    return calls;
+  }
+
+  const noSleep = async () => {};
+
+  test("a dropped connection is retried, and the answer that arrives is the one returned", async () => {
+    const calls = flaky(1);
+    const res = await fetchRetry("https://example.test/a", {}, FETCH_ATTEMPTS, noSleep);
+    expect(res.status).toBe(200);
+    expect(calls.length).toBe(2);
+  });
+
+  test("it survives everything short of the last attempt", async () => {
+    const calls = flaky(FETCH_ATTEMPTS - 1);
+    expect((await fetchRetry("https://example.test/a", {}, FETCH_ATTEMPTS, noSleep)).status).toBe(200);
+    expect(calls.length).toBe(FETCH_ATTEMPTS);
+  });
+
+  test("and gives up honestly when the network really is gone", async () => {
+    flaky(99, new Error("ECONNRESET"));
+    await expect(fetchRetry("https://example.test/a", {}, 3, noSleep)).rejects.toThrow("ECONNRESET");
+  });
+
+  test("a 404 is an answer, not a flake — it comes straight back", async () => {
+    let calls = 0;
+    globalThis.fetch = (() => {
+      calls++;
+      return Promise.resolve(new Response("nope", { status: 404 }));
+    }) as unknown as typeof fetch;
+    expect((await fetchRetry("https://example.test/a", {}, FETCH_ATTEMPTS, noSleep)).status).toBe(404);
+    expect(calls).toBe(1);
+  });
+
+  test("an update the user cancelled is not retried behind their back", async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    globalThis.fetch = (() => {
+      calls++;
+      controller.abort();
+      return Promise.reject(new Error("aborted"));
+    }) as unknown as typeof fetch;
+    await expect(fetchRetry("https://example.test/a", { signal: controller.signal }, FETCH_ATTEMPTS, noSleep)).rejects.toThrow("aborted");
+    expect(calls).toBe(1);
+  });
+
+  test("the wait between attempts grows", async () => {
+    flaky(2);
+    const waits: number[] = [];
+    await fetchRetry("https://example.test/a", {}, FETCH_ATTEMPTS, async (ms) => {
+      waits.push(ms);
+    });
+    expect(waits).toEqual([500, 1000]);
+  });
+
+  test("every attempt gets its own deadline — a spent signal would fail the retries instantly", async () => {
+    const calls = flaky(2);
+    await fetchRetry("https://example.test/a", { timeoutMs: 5_000 }, FETCH_ATTEMPTS, noSleep);
+    const signals = calls.map((c) => c.signal);
+    expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
+    expect(new Set(signals).size).toBe(3);
+    expect(calls.every((c) => !("timeoutMs" in c))).toBe(true); // never passed on to fetch
   });
 });
